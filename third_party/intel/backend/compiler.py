@@ -15,6 +15,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
+XE4 = 4
+PRE_XE4 = 0
+
 
 @functools.lru_cache()
 def _path_to_binary(binary: str):
@@ -29,7 +32,10 @@ def _path_to_binary(binary: str):
         if os.path.exists(bin) and os.path.isfile(bin):
             result = subprocess.check_output([bin, "--version"], stderr=subprocess.STDOUT)
             if result is not None:
-                version = re.search(r".*SPIRV-Tools v(\d+\.\d+).*", result.decode("utf-8"), flags=re.MULTILINE)
+                if binary == 'llc':
+                    version = re.search(r".*LLVM version (\d+\.\d+).*", result.decode("utf-8"), flags=re.MULTILINE)
+                else:
+                    version = re.search(r".*SPIRV-Tools v(\d+\.\d+).*", result.decode("utf-8"), flags=re.MULTILINE)
                 if version is not None:
                     return p, version.group(1)
     raise RuntimeError(f"Cannot find {binary}")
@@ -134,7 +140,15 @@ class XPUBackend(BaseBackend):
         mod = compile_module_from_src(Path(os.path.join(dirname, "arch_parser.c")).read_text(), "arch_utils")
         self.device_arch = mod.parse_device_arch(target.arch.get('architecture', 0))
         self.properties = self.parse_target(target.arch)
-        self.binary_ext = "spv"
+        # FIXME: set device capability according to device properties
+        self.capability = PRE_XE4
+        if ((os.getenv("TRITON_INTEL_ENABLE_XE4", "0") == "1")):
+            self.capability = XE4
+
+        if self.capability >= XE4:
+            self.binary_ext = "xebin"
+        else:
+            self.binary_ext = "spv"
 
     def parse_target(self, tgt_prop) -> dict:
         dev_prop = {}
@@ -218,7 +232,7 @@ class XPUBackend(BaseBackend):
         return mod
 
     @staticmethod
-    def make_ttgir(mod, metadata, opt, properties):
+    def make_ttgir(mod, metadata, opt, properties, capability):
         cluster_info = intel.ClusterInfo()
         if opt.cluster_dims is not None:
             cluster_info.clusterDimX = opt.cluster_dims[0]
@@ -281,7 +295,7 @@ class XPUBackend(BaseBackend):
         return mod
 
     @staticmethod
-    def make_llir(src, metadata, options):
+    def make_llir(src, metadata, options, capability):
         # warp-specialization mutates num_warps
         num_warp_groups = src.get_int_attr("ttg.num-warp-groups-per-cta")
         if num_warp_groups is not None:
@@ -321,7 +335,10 @@ class XPUBackend(BaseBackend):
         llvm.init_targets()
         context = llvm.context()
         llvm_mod = llvm.to_module(mod, context)
-        intel.set_spv_target_triple(llvm_mod)
+        if (capability >= XE4):
+            intel.set_xe4_target_triple(llvm_mod)
+        else:
+            intel.set_spv_target_triple(llvm_mod)
         if options.extern_libs:
             paths = [path for (name, path) in options.extern_libs]
             llvm.link_extern_libs(llvm_mod, paths)
@@ -405,11 +422,59 @@ class XPUBackend(BaseBackend):
             return zebin
         return spirv
 
+    @staticmethod
+    def make_xebin(src, metadata):
+        # Find kernel names (there should only be one)
+        names = re.findall(r"pisa_kernel void @([a-zA-Z_][a-zA-Z0-9_]*)", src)
+        assert len(names) == 1
+        metadata["name"] = names[0]
+        metadata["build_flags"] = ""
+
+        llc, _ = _path_to_binary("llc")
+        with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.ll') as fsrc, \
+            tempfile.NamedTemporaryFile(delete=False, mode='r', suffix='.log') as flog:
+            fsrc.write(src)
+            fsrc.flush()
+            name, _ = os.path.splitext(fsrc.name)
+            fbin = name + '.pisa.o'
+            cmd = [llc, '-march=xe', '-filetype=obj', fsrc.name, '-o', fbin]
+            try:
+                subprocess.run(cmd, check=True, close_fds=False, stderr=flog)
+                if os.path.exists(fsrc.name):
+                    os.remove(fsrc.name)
+                if os.path.exists(flog.name):
+                    os.remove(flog.name)
+            except subprocess.CalledProcessError as e:
+                with open(flog.name) as log_file:
+                    log = log_file.read()
+                if os.path.exists(flog.name):
+                    os.remove(flog.name)
+
+                if e.returncode == 255:
+                    error = 'Internal Triton llc codegen error'
+                elif e.returncode == 128 + signal.SIGSEGV:
+                    error = '`llc` raised SIGSEGV'
+                else:
+                    error = f'`llc` failed with error code {e.returncode}'
+
+                raise RuntimeError(f"{error}\n"
+                                   f"`llc` stderr:\n{log}\n"
+                                   f'Repro command: {" ".join(cmd)}\n')
+            with open(fbin, 'rb') as f:
+                fbin = f.read()
+            if os.path.exists(fbin):
+                os.remove(fbin)
+        return fbin
+
+
     def add_stages(self, stages, options):
         stages["ttir"] = lambda src, metadata: self.make_ttir(src, metadata, options)
-        stages["ttgir"] = lambda src, metadata: self.make_ttgir(src, metadata, options, self.properties)
-        stages["llir"] = lambda src, metadata: self.make_llir(src, metadata, options)
-        stages["spv"] = lambda src, metadata: self.make_spv(src, metadata, options)
+        stages["ttgir"] = lambda src, metadata: self.make_ttgir(src, metadata, options, self.properties, self.capability)
+        stages["llir"] = lambda src, metadata: self.make_llir(src, metadata, options, self.capability)
+        if self.capability >= XE4:
+            stages["xebin"] = lambda src, metadata: self.make_xebin(src, metadata)
+        else:
+            stages["spv"] = lambda src, metadata: self.make_spv(src, metadata, options)
 
     @functools.lru_cache()
     def hash(self):

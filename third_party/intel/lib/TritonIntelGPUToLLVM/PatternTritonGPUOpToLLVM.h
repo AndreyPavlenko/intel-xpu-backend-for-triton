@@ -8,6 +8,10 @@
 #include "triton/Conversion/TritonGPUToLLVM/PatternTritonGPUOpToLLVM.h"
 
 namespace mlir::triton::intel {
+// Xe4
+void populateXe4ToLLVMPatterns(TritonIntelGPUToLLVMTypeConverter &typeConverter,
+                               RewritePatternSet &patterns,
+                               PatternBenefit benefit);
 
 constexpr int patternBenefitAddSPIRVEnv = 30;
 
