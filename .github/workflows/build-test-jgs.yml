@@ -1,0 +1,20 @@
+name: Build and test on JGS simulator
+run-name: ${{ inputs.run_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_name:
+        description: Custom run name
+        type: string
+        default: "Build and test"
+
+permissions: read-all
+
+jobs:
+  test-job:
+    name: Test job
+    runs-on: jgs
+    steps:
+      - name: Test
+        run: echo "Test job"
