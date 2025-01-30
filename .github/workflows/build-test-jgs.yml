@@ -9,6 +9,15 @@ on:
         type: string
         default: "Build and test"
 
+  pull_request:
+    branches:
+      - main-js
+      - release/**
+  push:
+    branches:
+      - main-js
+      - release/**
+
 permissions: read-all
 
 jobs:
