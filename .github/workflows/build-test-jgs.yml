@@ -1,0 +1,29 @@
+name: Build and test on JGS simulator
+run-name: ${{ inputs.run_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_name:
+        description: Custom run name
+        type: string
+        default: "Build and test"
+
+  pull_request:
+    branches:
+      - main-js
+      - release/**
+  push:
+    branches:
+      - main-js
+      - release/**
+
+permissions: read-all
+
+jobs:
+  test-job:
+    name: Test job
+    runs-on: jgs
+    steps:
+      - name: Test
+        run: echo "Test job"
