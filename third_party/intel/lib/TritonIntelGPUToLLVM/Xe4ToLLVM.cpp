@@ -1,5 +1,6 @@
 #include "PatternTritonGPUOpToLLVM.h"
 #include "Utility.h"
+#include "Utils/LLVMIntr.h"
 #include "intel/include/Dialect/TritonIntelGPU/IR/Dialect.h"
 
 #include "mlir/Conversion/ConvertToLLVM/ToLLVMInterface.h"
@@ -23,30 +24,10 @@
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 
 using namespace mlir;
-namespace ttg = mlir::triton::gpu;
-namespace ttgi = mlir::triton::gpu::intel;
+using namespace mlir::triton::gpu;
+using namespace mlir::triton::gpu::intel;
 
 namespace {
-static LLVM::CallOp createDeviceFunctionCall(
-    ConversionPatternRewriter &rewriter, StringRef funcName, Type retType,
-    ArrayRef<Type> argTypes, ArrayRef<Value> args,
-    mlir::ArrayRef<std::pair<unsigned, mlir::StringRef>> paramAttrs) {
-  auto moduleOp = rewriter.getBlock()->getParent()->getParentOfType<ModuleOp>();
-  MLIRContext *ctx = rewriter.getContext();
-  Location loc = UnknownLoc::get(ctx);
-
-  LLVM::LLVMFuncOp funcOp =
-      LLVM::lookupOrCreateFn(moduleOp, funcName, argTypes, retType);
-  funcOp.setCConv(LLVM::cconv::CConv::PISA_FUNC);
-
-  for (auto [idx, attrName] : paramAttrs)
-    funcOp.setArgAttr(idx, attrName, rewriter.getUnitAttr());
-
-  auto callOp = rewriter.create<LLVM::CallOp>(loc, funcOp, args);
-  callOp->setAttrs(funcOp->getAttrs());
-
-  return callOp;
-}
 
 template <typename Op>
 struct IndexLowering : public ConvertOpToLLVMPattern<Op> {
@@ -71,7 +52,8 @@ struct IndexLowering : public ConvertOpToLLVMPattern<Op> {
     Type resTy =
         this->getTypeConverter()->convertType(op.getResult().getType());
     LLVM::CallOp call =
-        createDeviceFunctionCall(rewriter, funcName, resTy, {}, {}, {});
+        createDeviceFunctionCall(rewriter, funcName, resTy, {}, {}, {}, {}, {},
+                                 LLVM::cconv::CConv::SPIR_FUNC);
     rewriter.replaceOp(op, call);
     return success();
   }

@@ -3,6 +3,7 @@ from triton._C.libtriton import ir, passes, llvm, intel
 from triton.backends.intel.driver import compile_module_from_src
 
 from dataclasses import dataclass
+from enum import IntEnum
 import functools
 from typing import Any, Dict, Tuple
 from types import ModuleType
@@ -15,8 +16,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
-XE4 = 4
-PRE_XE4 = 0
+class Capability(IntEnum):
+    XE2 = 2
+    XE4 = 4
 
 
 @functools.lru_cache()
@@ -141,11 +143,11 @@ class XPUBackend(BaseBackend):
         self.device_arch = mod.parse_device_arch(target.arch.get('architecture', 0))
         self.properties = self.parse_target(target.arch)
         # FIXME: set device capability according to device properties
-        self.capability = PRE_XE4
+        self.capability = Capability.XE2
         if ((os.getenv("TRITON_INTEL_ENABLE_XE4", "0") == "1")):
-            self.capability = XE4
+            self.capability = Capability.XE4
 
-        if self.capability >= XE4:
+        if self.capability >= Capability.XE4:
             self.binary_ext = "xebin"
         else:
             self.binary_ext = "spv"
@@ -335,7 +337,7 @@ class XPUBackend(BaseBackend):
         llvm.init_targets()
         context = llvm.context()
         llvm_mod = llvm.to_module(mod, context)
-        if (capability >= XE4):
+        if (capability >= Capability.XE4):
             intel.set_xe4_target_triple(llvm_mod)
         else:
             intel.set_spv_target_triple(llvm_mod)
@@ -471,7 +473,7 @@ class XPUBackend(BaseBackend):
         stages["ttir"] = lambda src, metadata: self.make_ttir(src, metadata, options)
         stages["ttgir"] = lambda src, metadata: self.make_ttgir(src, metadata, options, self.properties, self.capability)
         stages["llir"] = lambda src, metadata: self.make_llir(src, metadata, options, self.capability)
-        if self.capability >= XE4:
+        if self.capability >= Capability.XE4:
             stages["xebin"] = lambda src, metadata: self.make_xebin(src, metadata)
         else:
             stages["spv"] = lambda src, metadata: self.make_spv(src, metadata, options)
