@@ -56,7 +56,7 @@ fi
 export PACKAGES_DIR=$BASE/packages
 export LLVM_PROJ=$BASE/llvm
 export LLVM_PROJ_BUILD=$LLVM_PROJ/build
-export TRITON_PROJ=$BASE/intel-xpu-backend-for-triton
+export TRITON_PROJ=$BASE/applications.python.intel-xpu-backend-for-triton
 export TRITON_PROJ_BUILD=$TRITON_PROJ/python/build
 
 if [ "$CLEAN" = true ]; then
@@ -84,7 +84,7 @@ fi
 if [ ! -d "$TRITON_PROJ" ]; then
   echo "****** Cloning $TRITON_PROJ ******"
   cd $BASE
-  git clone https://github.com/intel/intel-xpu-backend-for-triton.git
+  git clone https://github.com/intel-innersource/applications.python.intel-xpu-backend-for-triton -b main-js
 fi
 
 ############################################################################
@@ -105,8 +105,10 @@ build_llvm() {
   if [ ! -d "$LLVM_PROJ" ]; then
     echo "**** Cloning $LLVM_PROJ ****"
     cd $BASE
-    LLVM_COMMIT_ID="$(<$BASE/intel-xpu-backend-for-triton/cmake/llvm-hash.txt)"
-    git clone --recurse-submodules --jobs 8 https://github.com/llvm/llvm-project.git llvm
+    LLVM_COMMIT_ID="$(<$TRITON_PROJ/cmake/llvm-hash.txt)"
+    # TODO: switch to the original repo https://github.com/intel-innersource/drivers.gpu.compiler.llvm-pisa
+    # after merge of the required changes: https://github.com/intel-innersource/drivers.gpu.compiler.llvm-pisa/pull/4037
+    git clone --recurse-submodules --jobs 8 https://github.com/ienkovich/drivers.gpu.compiler.llvm-pisa llvm
     cd llvm
     git checkout $LLVM_COMMIT_ID
     git submodule update --recursive
@@ -133,6 +135,8 @@ build_llvm() {
     -DLLVM_ENABLE_ASSERTIONS=true \
     -DLLVM_ENABLE_PROJECTS="mlir" \
     -DLLVM_TARGETS_TO_BUILD="X86;NVPTX;AMDGPU" \
+    -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD="pISA;Xe" \
+    -DENABLE_PISA_3D=true \
     -DLLVM_INSTALL_UTILS=true \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
     -DCMAKE_INSTALL_PREFIX=$PACKAGES_DIR/llvm \
