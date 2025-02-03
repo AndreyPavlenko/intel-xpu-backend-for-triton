@@ -23,6 +23,8 @@ import torch
 import triton
 import triton.language as tl
 
+import os
+
 DEVICE = triton.runtime.driver.active.get_active_torch_device()
 
 
@@ -83,10 +85,12 @@ def add(x: torch.Tensor, y: torch.Tensor):
 
 torch.manual_seed(0)
 size = 98432
-x = torch.rand(size, device=DEVICE)
-y = torch.rand(size, device=DEVICE)
-output_torch = x + y
-output_triton = add(x, y)
+x_cpu = torch.rand(size, device="cpu")
+y_cpu = torch.rand(size, device="cpu")
+x = x_cpu.to(DEVICE)
+y = y_cpu.to(DEVICE)
+output_torch = x_cpu + y_cpu
+output_triton = add(x, y).cpu()
 print(output_torch)
 print(output_triton)
 print(f'The maximum difference between torch and triton is '
@@ -132,4 +136,7 @@ def benchmark(size, provider):
 # %%
 # We can now run the decorated function above. Pass `print_data=True` to see the performance number, `show_plots=True` to plot them, and/or
 # `save_path='/path/to/results/' to save them to disk along with raw CSV data:
-benchmark.run(print_data=True, show_plots=True)
+if os.getenv("TRITON_INTEL_ENABLE_XE4", "0") == "1":
+    print("Skip benchmarking for Xe4")
+else:
+    benchmark.run(print_data=True, show_plots=True)

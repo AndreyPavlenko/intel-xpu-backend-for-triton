@@ -95,6 +95,12 @@ struct ConvertTritonGPUToLLVM
     mlir::triton::intel::TritonGPUToLLVMPipelineManager pipelineManager(
         mod, context, isAdvancedPathEnabled, oneMatrixPerLoadForBT);
     mlir::LowerToLLVMOptions option(context);
+
+    // for Xe4
+    bool isXe4 = mlir::triton::tools::getBoolEnv("TRITON_INTEL_ENABLE_XE4");
+    if (isXe4)
+      option.overrideIndexBitwidth(32);
+
     mlir::triton::intel::TargetInfo targetInfo;
     TritonIntelGPUToLLVMTypeConverter typeConverter(context, option, targetInfo,
                                                     isAdvancedPathEnabled);
