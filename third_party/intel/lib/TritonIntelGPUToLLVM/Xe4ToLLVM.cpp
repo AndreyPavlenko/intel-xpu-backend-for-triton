@@ -53,7 +53,7 @@ struct IndexLowering : public ConvertOpToLLVMPattern<Op> {
         this->getTypeConverter()->convertType(op.getResult().getType());
     LLVM::CallOp call =
         createDeviceFunctionCall(rewriter, funcName, resTy, {}, {}, {}, {}, {},
-                                 LLVM::cconv::CConv::SPIR_FUNC);
+                                 LLVM::cconv::CConv::PISA_FUNC);
     rewriter.replaceOp(op, call);
     return success();
   }
