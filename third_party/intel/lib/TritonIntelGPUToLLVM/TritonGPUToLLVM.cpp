@@ -59,8 +59,10 @@ public:
     addIllegalDialect<triton::gpu::intel::TritonIntelGPUDialect>();
     addIllegalDialect<mlir::gpu::GPUDialect>();
     addLegalOp<mlir::UnrealizedConversionCastOp>();
-    addDynamicallyLegalOp<ModuleOp>(
-        [](ModuleOp op) { return spirv::lookupTargetEnv(op) != nullptr; });
+    addDynamicallyLegalOp<ModuleOp>([](ModuleOp op) {
+      return !triton::gpu::intel::hasSpirvTargetArch(op) ||
+             spirv::lookupTargetEnv(op) != nullptr;
+    });
   }
 };
 
@@ -97,8 +99,8 @@ struct ConvertTritonGPUToLLVM
     mlir::LowerToLLVMOptions option(context);
 
     // for Xe4
-    bool isXe4 = mlir::triton::tools::getBoolEnv("TRITON_INTEL_ENABLE_XE4");
-    if (isXe4)
+    bool isPisa = triton::gpu::intel::hasPisaTargetArch(mod);
+    if (isPisa)
       option.overrideIndexBitwidth(32);
 
     mlir::triton::intel::TargetInfo targetInfo;

@@ -23,6 +23,7 @@
 #include "mlir/Dialect/SPIRV/IR/TargetAndABI.h"
 #include "mlir/IR/PatternMatch.h"
 
+#include "intel/include/Dialect/TritonIntelGPU/IR/Utils.h"
 #include "intel/include/GPUToTritonGEN/GPUToTritonGENPass.h"
 #include "intel/include/TritonGENToLLVM/TritonGENToLLVMPass.h"
 #include "triton/Analysis/AxisInfo.h"
@@ -112,10 +113,9 @@ struct FuncOpConversion : public ConvertOpToLLVMPattern<triton::FuncOp> {
     auto mod = funcOp->getParentOfType<ModuleOp>();
     int threadsPerWarp = triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
     if (LLVM::isKernel(funcOp)) {
-      // TODO: pass target through pass options.
-      bool isXe4 = mlir::triton::tools::getBoolEnv("TRITON_INTEL_ENABLE_XE4");
-      newFuncOp.setCConv(isXe4 ? LLVM::CConv::PISA_KERNEL
-                               : LLVM::CConv::SPIR_KERNEL);
+      bool isPisa = gpu::intel::hasPisaTargetArch(funcOp);
+      newFuncOp.setCConv(isPisa ? LLVM::CConv::PISA_KERNEL
+                                : LLVM::CConv::SPIR_KERNEL);
       newFuncOp.setLinkage(LLVM::Linkage::External);
     }
 
@@ -146,7 +146,7 @@ struct AddSPIRVEnvPattern : public mlir::OpRewritePattern<ModuleOp> {
 
   LogicalResult matchAndRewrite(ModuleOp op,
                                 PatternRewriter &rewriter) const override {
-    if (spirv::lookupTargetEnv(op)) {
+    if (!gpu::intel::hasSpirvTargetArch(op) || spirv::lookupTargetEnv(op)) {
       return failure();
     }
 
@@ -272,9 +272,8 @@ public:
     populateGpuToLLVMSPVConversionPatterns(typeConverter, patterns);
     populateSPIRVToLLVMConversionPatterns(typeConverter, patterns,
                                           spirv::ClientAPI::OpenCL);
-    // TODO: pass target through pass options.
-    bool isXe4 = mlir::triton::tools::getBoolEnv("TRITON_INTEL_ENABLE_XE4");
-    if (isXe4) {
+
+    if (gpu::intel::hasPisaTargetArch(mod)) {
       // ttg/ttig/gpu dialect to llvm
       intel::populateXe4ToLLVMPatterns(typeConverter, patterns, benefit);
     }
