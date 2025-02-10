@@ -9,6 +9,7 @@
 #include "llvm/ADT/TypeSwitch.h"
 
 #include "intel/include/Dialect/TritonIntelGPU/IR/Dialect.h"
+#include "intel/include/Dialect/TritonIntelGPU/IR/Utils.h"
 
 using namespace mlir;
 
@@ -79,15 +80,21 @@ Value convertBf16ToFp32(Location loc, ConversionPatternRewriter &rewriter,
     auto moduleOp = definingOp->getParentWithTrait<OpTrait::SymbolTable>();
     if (moduleOp->hasAttr(triton::gpu::intel::TritonIntelGPUDialect::
                               getSupportBF16ConversionAttrName())) {
-      constexpr StringLiteral baseName = "__spirv_ConvertBF16ToFINTEL";
-      Type inTy = getTypeWithSameShape(v.getType(), i16_ty);
-      Type outTy = getTypeWithSameShape(inTy, f32_ty);
-      std::string name = mlir::triton::gpu::intel::mangle(baseName, inTy);
-      auto ext_func = triton::gpu::intel::lookupOrCreateSPIRVFn(moduleOp, name,
-                                                                inTy, outTy);
-      auto call = triton::gpu::intel::createSPIRVBuiltinCall(
-          loc, rewriter, ext_func, bitcast(v, inTy).getResult());
-      return call.getResult();
+      // For SPIRV target, use specialized intrinsic call for conversion.
+      // Otherwise, use fpext operation.
+      if (gpu::intel::hasSpirvTargetArch(moduleOp)) {
+        constexpr StringLiteral baseName = "__spirv_ConvertBF16ToFINTEL";
+        Type inTy = getTypeWithSameShape(v.getType(), i16_ty);
+        Type outTy = getTypeWithSameShape(inTy, f32_ty);
+        std::string name = mlir::triton::gpu::intel::mangle(baseName, inTy);
+        auto ext_func = triton::gpu::intel::lookupOrCreateSPIRVFn(
+            moduleOp, name, inTy, outTy);
+        auto call = triton::gpu::intel::createSPIRVBuiltinCall(
+            loc, rewriter, ext_func, bitcast(v, inTy).getResult());
+        return call.getResult();
+      }
+
+      return rewriter.create<LLVM::FPExtOp>(loc, f32_ty, v);
     }
   }
 
@@ -105,16 +112,21 @@ Value convertFp32ToBf16(Location loc, ConversionPatternRewriter &rewriter,
                               getSupportBF16ConversionAttrName()) &&
         rounding == RoundingMode::RTNE) {
       // Intel SPIR-V extension only supports round-to-nearest-even
-      constexpr StringLiteral baseName = "__spirv_ConvertFToBF16INTEL";
-      Type inTy = v.getType();
-      Type funcOutTy = getTypeWithSameShape(inTy, i16_ty);
-      Type outTy = getTypeWithSameShape(inTy, bf16_ty);
-      std::string name = mlir::triton::gpu::intel::mangle(baseName, inTy);
-      auto trunc_func = triton::gpu::intel::lookupOrCreateSPIRVFn(
-          moduleOp, name, inTy, funcOutTy);
-      auto call = triton::gpu::intel::createSPIRVBuiltinCall(loc, rewriter,
-                                                             trunc_func, v);
-      return bitcast(call.getResult(), outTy);
+      // LLVM fptrunc operation also assumes round-to-nearest mode
+      if (gpu::intel::hasSpirvTargetArch(moduleOp)) {
+        constexpr StringLiteral baseName = "__spirv_ConvertFToBF16INTEL";
+        Type inTy = v.getType();
+        Type funcOutTy = getTypeWithSameShape(inTy, i16_ty);
+        Type outTy = getTypeWithSameShape(inTy, bf16_ty);
+        std::string name = mlir::triton::gpu::intel::mangle(baseName, inTy);
+        auto trunc_func = triton::gpu::intel::lookupOrCreateSPIRVFn(
+            moduleOp, name, inTy, funcOutTy);
+        auto call = triton::gpu::intel::createSPIRVBuiltinCall(loc, rewriter,
+                                                               trunc_func, v);
+        return bitcast(call.getResult(), outTy);
+      }
+
+      return rewriter.create<LLVM::FPTruncOp>(loc, bf16_ty, v);
     }
   }
 

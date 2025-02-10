@@ -119,7 +119,7 @@ def to_triton(x: np.ndarray, device, dst_type=None) -> Union[TensorWrapper, torc
         if dst_type and 'float8' in dst_type:
             return reinterpret(torch.tensor(x, device=device), getattr(tl, dst_type))
         if t == 'float32' and dst_type == 'bfloat16':
-            return torch.tensor(x, device=device).bfloat16()
+            return torch.tensor(x, device="cpu").bfloat16().to(device)
         return torch.tensor(x, device=device)
 
 
