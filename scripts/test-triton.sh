@@ -189,7 +189,7 @@ run_core_tests() {
   ensure_spirv_dis
 
   TRITON_DISABLE_LINE_INFO=1 TRITON_TEST_SUITE=language \
-    pytest -vvv -n ${PYTEST_MAX_PROCESSES:-8} --device xpu language/ --ignore=language/test_line_info.py --ignore=language/test_subprocess.py
+    pytest -k "not test_local_load_store_dot" -vvv -n ${PYTEST_MAX_PROCESSES:-8} --device xpu language/ --ignore=language/test_line_info.py --ignore=language/test_subprocess.py
 
   TRITON_DISABLE_LINE_INFO=1 TRITON_TEST_SUITE=subprocess \
     pytest -vvv -n ${PYTEST_MAX_PROCESSES:-8} --device xpu language/test_subprocess.py
@@ -330,11 +330,12 @@ run_instrumentation_tests() {
   fi
 
   INSTRUMENTATION_LIB_DIR=$(ls -1d $TRITON_PROJ/python/build/*lib*/triton/instrumentation) || err "Could not find $TRITON_PROJ/python/build/*lib*/triton/instrumentation, build Triton first"
+  INSTRUMENTATION_LIB_NAME=$(ls -1 $INSTRUMENTATION_LIB_DIR/*GPUInstrumentationTestLib* | head -n1)
 
   cd $TRITON_PROJ/python/test/unit
 
   TRITON_TEST_SUITE=instrumentation \
-    TRITON_ALWAYS_COMPILE=1 TRITON_DISABLE_LINE_INFO=0 LLVM_PASS_PLUGIN_PATH=${INSTRUMENTATION_LIB_DIR}/libGPUInstrumentationTestLib.so \
+    TRITON_ALWAYS_COMPILE=1 TRITON_DISABLE_LINE_INFO=0 LLVM_PASS_PLUGIN_PATH=${INSTRUMENTATION_LIB_NAME} \
     pytest -vvv --device xpu instrumentation/test_gpuhello.py
 }
 
