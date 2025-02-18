@@ -8,6 +8,10 @@ on:
         description: Custom run name
         type: string
         default: "Build and test"
+      python_version:
+        description: Python version
+        type: string
+        default: "3.10"
 
   pull_request:
     branches:
@@ -20,10 +24,55 @@ on:
 
 permissions: read-all
 
+env:
+  PYTHON_VERSION: ${{ inputs.python_version || '3.10' }}
+  LLVM_REPO: ienkovich/drivers.gpu.compiler.llvm-pisa
+
 jobs:
   test-job:
-    name: Test job
+    name: Build and test
     runs-on: jgs
     steps:
-      - name: Test
-        run: echo "Test job"
+      - name: Print inputs
+        run: |
+          cat <<EOF
+          ${{ toJSON(inputs) }}
+          EOF
+
+      - name: Checkout Triton repository
+        uses: actions/checkout@v4
+        with:
+          path: applications.python.intel-xpu-backend-for-triton
+
+      - name: Install Python (using actions/setup-python) ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Read LLVM hash
+        id: llvm-hash
+        run: |
+          echo hash="$(<applications.python.intel-xpu-backend-for-triton/cmake/llvm-hash.txt)" >> ${GITHUB_OUTPUT}
+
+      # LLVM checkout has to be here instead of compile-triton.sh script because clone requires
+      # a token to access intel-innersource LLVM repo.
+      - name: Checkout LLVM repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.llvm-hash.outputs.hash }}
+          path: llvm
+          token: ${{ secrets.GLADOS_TOKEN }}
+          repository: ${{ env.LLVM_REPO }}
+          submodules: recursive
+
+      - name: Set up environment and run tutorial test
+        env:
+          GH_TOKEN: ${{ secrets.GLADOS_TOKEN }}
+        run: |
+          cd applications.python.intel-xpu-backend-for-triton
+          source /opt/intel/oneapi/setvars.sh
+          set -ex -o pipefail
+          source /jgssim/jgssim-env.sh
+          ./scripts/install-pytorch.sh
+          ./scripts/compile-triton.sh --llvm --triton
+          python ./python/tutorials/01-vector-add.py
