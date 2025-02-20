@@ -18,4 +18,12 @@
 #define GET_OP_CLASSES
 #include "intel/include/Dialect/TritonIntelGPU/IR/Ops.h.inc"
 
+namespace mlir::triton::gpu::intel {
+
+inline bool supportsFP8DPAS(ModuleOp mod) {
+  return mod->hasAttr(TritonIntelGPUDialect::getSupportFP8DPASAttrName());
+}
+
+} // namespace mlir::triton::gpu::intel
+
 #endif // TRITON_DIALECT_TRITON_INTEL_GPU_IR_DIALECT_H

@@ -401,11 +401,12 @@ DpasEncodingAttr::getDPASCapability(ModuleOp mod) {
   return DPASCapability();
 }
 
-unsigned DpasEncodingAttr::getOpsPerChannel(Type elemType) {
+unsigned DpasEncodingAttr::getOpsPerChannel(Type elemType, ModuleOp mod) {
   assert(elemType.isIntOrFloat() && "unsupported type for DpasEncodingAttr");
 
   unsigned dpasElemBitWidths = elemType.getIntOrFloatBitWidth();
-  if (llvm::isa<Float8E5M2Type, Float8E4M3FNType>(elemType))
+  bool supportsFP8 = mlir::triton::gpu::intel::supportsFP8DPAS(mod);
+  if (!supportsFP8 && llvm::isa<Float8E5M2Type, Float8E4M3FNType>(elemType))
     dpasElemBitWidths *= 2; // We are upcasting FP8 to FP16.
 
   return DPASCapability::opsChanBitWidths / dpasElemBitWidths;

@@ -40,6 +40,10 @@ struct TritonAnnotateModule
     mod->setAttr(intel::TritonIntelGPUDialect::getTargetArchAttrName(),
                  builder.getStringAttr(targetArch));
 
+    if (supportFP8DPAS)
+      mod->setAttr(intel::TritonIntelGPUDialect::getSupportFP8DPASAttrName(),
+                   builder.getUnitAttr());
+
     DPASAnalysis &dpasAnalysis = getAnalysis<DPASAnalysis>();
     setThreadsPerWarp(mod, dpasAnalysis);
   }

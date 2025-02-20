@@ -251,7 +251,7 @@ The semantic of this `tt.dot` includes GEMM tiling configuration as:
     };
 
     static DPASCapability getDPASCapability(mlir::ModuleOp mod);
-    static unsigned getOpsPerChannel(Type elemType);
+    static unsigned getOpsPerChannel(Type elemType, mlir::ModuleOp mod);
   }];
 
   let hasCustomAssemblyFormat = 1;

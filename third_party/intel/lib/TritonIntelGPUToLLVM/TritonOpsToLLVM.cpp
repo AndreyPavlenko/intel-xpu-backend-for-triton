@@ -446,6 +446,10 @@ public:
         if (type.isUnsignedInteger())
           return TritonGEN::PrecisionType::U8;
         return TritonGEN::PrecisionType::S8;
+      } else if (isa<Float8E5M2Type>(type)) {
+        return TritonGEN::PrecisionType::F8E5M2;
+      } else if (isa<Float8E4M3Type>(type)) {
+        return TritonGEN::PrecisionType::F8E4M3FN;
       }
 
       llvm_unreachable("add more support for PrecisionType");

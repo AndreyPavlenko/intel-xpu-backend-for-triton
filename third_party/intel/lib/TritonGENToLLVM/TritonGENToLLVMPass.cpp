@@ -19,6 +19,7 @@
 #include "mlir/Dialect/SPIRV/IR/TargetAndABI.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
@@ -377,6 +378,19 @@ struct TritonMatrixDPASLowering
         stringifyPrecisionType(op.getPb()).str() + "_matrix_mad_k" +
         std::to_string(8 /*systolic depth*/ *
                        getNumOperandsPerDword(precisionA));
+    // Currently IGC expects a suffix for the return type with fp8 DPAS builtins
+    if (op.getPb() == ::mlir::triton::TritonGEN::PrecisionType::F8E5M2 ||
+        op.getPb() == ::mlir::triton::TritonGEN::PrecisionType::F8E4M3FN) {
+      auto cElTy = cTy.getElementType();
+      if (cElTy.isBF16())
+        fnName.append("_bf16");
+      else if (cElTy.isF16())
+        fnName.append("_f16");
+      else if (cElTy.isF32())
+        fnName.append("_f32");
+      else
+        llvm_unreachable("Unsupported return type in fp8 DPAS");
+    }
 
     SmallVector<Type> argTypes{aTy, bTy, cTy};
     fnName = intel::mangle(fnName, argTypes);
@@ -409,6 +423,8 @@ private:
       return 2;
     case TritonGEN::PrecisionType::U8:
     case TritonGEN::PrecisionType::S8:
+    case TritonGEN::PrecisionType::F8E5M2:
+    case TritonGEN::PrecisionType::F8E4M3FN:
       return 4;
     default:
       llvm_unreachable("unsupported TritonGEN::PrecisionType");

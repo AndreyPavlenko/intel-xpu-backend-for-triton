@@ -18,6 +18,7 @@ from pathlib import Path
 
 class Capability(IntEnum):
     XE2 = 2
+    XE3p = 3
     XE4 = 4
 
 
@@ -141,16 +142,20 @@ class XPUBackend(BaseBackend):
         dirname = os.path.dirname(os.path.realpath(__file__))
         mod = compile_module_from_src(Path(os.path.join(dirname, "arch_parser.c")).read_text(), "arch_utils")
         self.device_arch = mod.parse_device_arch(target.arch.get('architecture', 0))
-        self.properties = self.parse_target(target.arch)
+
         # FIXME: set device capability according to device properties
         self.capability = Capability.XE2
         if ((os.getenv("TRITON_INTEL_ENABLE_XE4", "0") == "1")):
             self.capability = Capability.XE4
+        if ((os.getenv("TRITON_INTEL_ENABLE_XE3P", "0") == "1")):
+            self.capability = Capability.XE3p
 
         if self.capability >= Capability.XE4:
             self.binary_ext = "xebin"
         else:
             self.binary_ext = "spv"
+        
+        self.properties = self.parse_target(target.arch)
 
     def parse_target(self, tgt_prop) -> dict:
         dev_prop = {}
@@ -171,6 +176,8 @@ class XPUBackend(BaseBackend):
         dev_prop['has_subgroup_2d_block_io'] = tgt_prop.get('has_subgroup_2d_block_io', False)
         dev_prop['has_bfloat16_conversions'] = tgt_prop.get('has_bfloat16_conversions', True)
 
+        # FIXME: Query device properties instead of relying on the capability
+        dev_prop['has_fp8_dpas'] = self.capability >= Capability.XE3p
         if self.device_arch and shutil.which('ocloc'):
             if self.device_arch in self.device_props:
                 dev_prop.update(self.device_props[self.device_arch])
@@ -253,8 +260,10 @@ class XPUBackend(BaseBackend):
         intel.passes.ttgpuir.add_triton_annotate_module(pm, min(properties["sub_group_sizes"]),
                                                         properties["has_subgroup_2d_block_io"],
                                                         properties["has_subgroup_matrix_multiply_accumulate"],
-                                                        properties["has_bfloat16_conversions"], opt.threads_per_warp,
+                                                        properties["has_bfloat16_conversions"],
+                                                        properties["has_fp8_dpas"], opt.threads_per_warp,
                                                         target_arch)
+
         pm.run(mod)
 
         # Overwrite the threads_per_warp option with the module annotation.

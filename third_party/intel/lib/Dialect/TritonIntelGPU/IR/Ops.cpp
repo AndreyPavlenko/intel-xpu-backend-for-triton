@@ -309,8 +309,8 @@ UpcastMXFPOp::deduceOutputType(TypedValue<RankedTensorType> inputTensor,
   // the parent's DPAS layout opsPerChannel so we need to materialize a
   // new DPAS layout.
   auto dpasEncoding = cast<intel::DpasEncodingAttr>(oldEncoding.getParent());
-  unsigned opsPerChannel =
-      intel::DpasEncodingAttr::getOpsPerChannel(outputElemType);
+  unsigned opsPerChannel = intel::DpasEncodingAttr::getOpsPerChannel(
+      outputElemType, inputTensor.getDefiningOp()->getParentOfType<ModuleOp>());
   // e2m1 is packed 2 elements per int8, we must handle continuous 2
   // elements when upcasting to bf16
   if (xTy.getElementType() == IntegerType::get(ctx, 8))

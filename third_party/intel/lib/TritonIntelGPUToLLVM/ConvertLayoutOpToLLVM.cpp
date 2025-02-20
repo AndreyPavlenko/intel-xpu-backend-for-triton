@@ -277,6 +277,8 @@ private:
     const auto &origRepShape = scratchConfig.repShape;
     if (isa<mlir::Float8E4M3B11FNUZType, mlir::Float8E4M3FNType>(
             getElementTypeOrSelf(op.getType()))) {
+      // TODO: need to check why these asserts are here and if it's safe to
+      // remove them when doing hf8 native DPAS.
       assert(inVec % 4 == 0 && "conversion not supported for FP8E4M3B15");
       assert(outVec % 4 == 0 && "conversion not supported for FP8E4M3B15");
     }

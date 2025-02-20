@@ -115,7 +115,8 @@ public:
 
     auto dpasCap = ttgi::DpasEncodingAttr::getDPASCapability(mod);
     Type elemType = oldAType.getElementType();
-    unsigned opsPerChan = ttgi::DpasEncodingAttr::getOpsPerChannel(elemType);
+    unsigned opsPerChan =
+        ttgi::DpasEncodingAttr::getOpsPerChannel(elemType, mod);
     SmallVector<unsigned> warpsPerTile =
         getWarpsPerTile(dotOp, dpasCap, retShape, numWarps);
     size_t rank = retShape.size();
@@ -371,7 +372,7 @@ private:
     Type elemType =
         aScale ? b.getType().getElementType() : a.getType().getElementType();
     unsigned opsPerChan =
-        ttg::intel::DpasEncodingAttr::getOpsPerChannel(elemType);
+        ttg::intel::DpasEncodingAttr::getOpsPerChannel(elemType, mod);
     unsigned numWarps = ttg::TritonGPUDialect::getNumWarps(mod);
     SmallVector<unsigned> warpsPerTile = {numWarps, 1};
 
@@ -488,9 +489,12 @@ static void decomposeMixedModeDotOp(ModuleOp mod) {
     Type promoteType;
     if (dpasLayout) {
       bool isNativeFP8 = isa<Float8E5M2Type, Float8E4M3FNType>(AElType);
-      // fp8 is not natively supported by the the DPAS instruction, promote it
-      // to fp16.
-      if (!isNativeFP8)
+      // fp8 is not always natively supported by the the DPAS instruction,
+      // promote it to fp16 when necessary
+
+      bool supportsFP8 = mlir::triton::gpu::intel::supportsFP8DPAS(
+          dotOp->getParentOfType<ModuleOp>());
+      if (supportsFP8 || !isNativeFP8)
         return;
       promoteType = builder.getF16Type();
     } else {

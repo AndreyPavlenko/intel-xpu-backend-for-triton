@@ -55,6 +55,12 @@ def TritonIntelGPU_Dialect : Dialect {
     static constexpr llvm::StringRef getTargetArchAttrName() {
       return "triton_intel_gpu.target_arch";
     }
+
+    /// Get the name of the attribute used to indicate whether the native fp8
+    /// DPAS instruction is available
+    static constexpr llvm::StringRef getSupportFP8DPASAttrName() {
+      return "triton_intel_gpu.support_fp8_dpas";
+    }
   }];
 
   let useDefaultAttributePrinterParser = 1;
