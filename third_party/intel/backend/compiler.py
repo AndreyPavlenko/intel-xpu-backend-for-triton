@@ -438,47 +438,19 @@ class XPUBackend(BaseBackend):
     @staticmethod
     def make_xebin(src, metadata):
         # Find kernel names (there should only be one)
-        names = re.findall(r"pisa_kernel void @([a-zA-Z_][a-zA-Z0-9_]*)", src)
+        names = re.findall(r"pisa_kernel void @(\w+)", src)
         assert len(names) == 1
         metadata["name"] = names[0]
         metadata["build_flags"] = ""
 
         llc, _ = _path_to_binary("llc")
-        with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.ll') as fsrc, \
-            tempfile.NamedTemporaryFile(delete=False, mode='r', suffix='.log') as flog:
-            fsrc.write(src)
-            fsrc.flush()
-            name, _ = os.path.splitext(fsrc.name)
-            fbin = name + '.pisa.o'
-            cmd = [llc, '-march=xe', '-filetype=obj', fsrc.name, '-o', fbin]
-            try:
-                subprocess.run(cmd, check=True, close_fds=False, stderr=flog)
-                if os.path.exists(fsrc.name):
-                    os.remove(fsrc.name)
-                if os.path.exists(flog.name):
-                    os.remove(flog.name)
-            except subprocess.CalledProcessError as e:
-                with open(flog.name) as log_file:
-                    log = log_file.read()
-                if os.path.exists(flog.name):
-                    os.remove(flog.name)
-
-                if e.returncode == 255:
-                    error = 'Internal Triton llc codegen error'
-                elif e.returncode == 128 + signal.SIGSEGV:
-                    error = '`llc` raised SIGSEGV'
-                else:
-                    error = f'`llc` failed with error code {e.returncode}'
-
-                raise RuntimeError(f"{error}\n"
-                                   f"`llc` stderr:\n{log}\n"
-                                   f'Repro command: {" ".join(cmd)}\n')
-            with open(fbin, 'rb') as f:
-                fbin = f.read()
-            if os.path.exists(fbin):
-                os.remove(fbin)
-        return fbin
-
+        cmd = [llc, "-march=xe", "-filetype=obj"]
+        try:
+            return subprocess.run(cmd, input=src.encode(), capture_output=True, check=True).stdout
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"`llc` failed with error code {e.returncode}\n"
+                               f"command: {' '.join(cmd)}\n"
+                               f"stderr:\n{e.stderr.decode()}")
 
     def add_stages(self, stages, options):
         stages["ttir"] = lambda src, metadata: self.make_ttir(src, metadata, options)
