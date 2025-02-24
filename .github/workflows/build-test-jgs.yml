@@ -75,4 +75,5 @@ jobs:
           source /jgssim/jgssim-env.sh
           ./scripts/install-pytorch.sh
           ./scripts/compile-triton.sh --llvm --triton
+          export PATH="$(realpath ../packages/llvm/bin):$PATH"
           python ./python/tutorials/01-vector-add.py
