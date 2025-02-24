@@ -61,6 +61,28 @@ struct IndexLowering : public ConvertOpToLLVMPattern<Op> {
   std::string name;
 };
 
+struct BarrierLowering : public ConvertOpToLLVMPattern<mlir::gpu::BarrierOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(mlir::gpu::BarrierOp op,
+                  mlir::gpu::BarrierOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    Location loc = op->getLoc();
+    // In pISA we use a fence to sync memory and a barrier to sync control flow.
+    // So gpu.barrier is replaced with a sequence:
+    //   fence syncscope("workgroup-shared") acq_rel
+    //   llvm.pisa.workgroup.barrier
+    rewriter.create<LLVM::FenceOp>(loc, LLVM::AtomicOrdering::acq_rel,
+                                   "workgroup-shared");
+    createDeviceFunctionCall(rewriter, "llvm.pisa.workgroup.barrier",
+                             LLVM::LLVMVoidType::get(getContext()), {}, {}, {},
+                             {}, {}, LLVM::cconv::CConv::PISA_FUNC);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
 } // namespace
 
 void mlir::triton::intel::populateXe4ToLLVMPatterns(
@@ -70,4 +92,5 @@ void mlir::triton::intel::populateXe4ToLLVMPatterns(
   patterns.add<IndexLowering<mlir::gpu::BlockDimOp>>(typeConverter,
                                                      "localsize");
   patterns.add<IndexLowering<mlir::gpu::ThreadIdOp>>(typeConverter, "localid");
+  patterns.add<BarrierLowering>(typeConverter);
 }
