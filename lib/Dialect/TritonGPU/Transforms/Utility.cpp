@@ -12,6 +12,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "triton/Dialect/TritonGPU/IR/LinearLayoutConversions.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "llvm/Support/Debug.h"
@@ -138,6 +139,10 @@ unsigned getNumElementsPerThread(Operation *op, SmallVector<unsigned> order,
                         << ", contig: " << valInfo.getContiguity(order[0])
                         << ", alignment: " << alignment);
   return currPerThread;
+}
+
+bool isView(Operation *op) {
+  return isa<ExpandDimsOp, ReshapeOp, TransOp, JoinOp, SplitOp>(op);
 }
 
 //===----------------------------------------------------------------------===//
@@ -312,9 +317,10 @@ static Attribute inferDstEncoding(triton::ExpandDimsOp op, Attribute encoding) {
 
 static Attribute inferDstEncoding(JoinOp op, Attribute srcEnc) {
   Attribute dstEnc;
+  auto shape = op.getLhs().getType().getShape();
   if (srcEnc.getDialect()
           .getRegisteredInterface<DialectInferLayoutInterface>()
-          ->inferJoinOpEncoding(srcEnc, dstEnc,
+          ->inferJoinOpEncoding(srcEnc, dstEnc, shape,
                                 /*loc=*/std::nullopt)
           .succeeded()) {
     return dstEnc;
@@ -324,9 +330,10 @@ static Attribute inferDstEncoding(JoinOp op, Attribute srcEnc) {
 
 static Attribute inferDstEncoding(SplitOp op, Attribute srcEnc) {
   Attribute dstEnc;
+  auto shape = op.getSrc().getType().getShape();
   if (srcEnc.getDialect()
           .getRegisteredInterface<DialectInferLayoutInterface>()
-          ->inferSplitOpEncoding(srcEnc, dstEnc,
+          ->inferSplitOpEncoding(srcEnc, dstEnc, shape,
                                  /*loc=*/std::nullopt)
           .succeeded()) {
     return dstEnc;
@@ -350,10 +357,11 @@ static Attribute inferSrcEncoding(triton::ExpandDimsOp op, Attribute encoding) {
 
 static Attribute inferSrcEncoding(JoinOp op, Attribute dstEnc) {
   // Split is the inverse of join.
+  auto shape = op.getResult().getType().getShape();
   Attribute srcEnc;
   if (dstEnc.getDialect()
           .getRegisteredInterface<DialectInferLayoutInterface>()
-          ->inferSplitOpEncoding(dstEnc, srcEnc, /*loc=*/std::nullopt)
+          ->inferSplitOpEncoding(dstEnc, srcEnc, shape, /*loc=*/std::nullopt)
           .succeeded()) {
     return srcEnc;
   }
@@ -363,9 +371,10 @@ static Attribute inferSrcEncoding(JoinOp op, Attribute dstEnc) {
 static Attribute inferSrcEncoding(SplitOp op, Attribute dstEnc) {
   // Join is the inverse of split.
   Attribute srcEnc;
+  auto shape = op.getOutLHS().getType().getShape();
   if (dstEnc.getDialect()
           .getRegisteredInterface<DialectInferLayoutInterface>()
-          ->inferJoinOpEncoding(dstEnc, srcEnc, /*loc=*/std::nullopt)
+          ->inferJoinOpEncoding(dstEnc, srcEnc, shape, /*loc=*/std::nullopt)
           .succeeded()) {
     return srcEnc;
   }
@@ -387,6 +396,31 @@ static Attribute inferTransOpDstEncoding(Attribute srcEnc,
               .getRegisteredInterface<triton::DialectInferLayoutInterface>()
               ->inferTransOpEncoding(srcEnc, shape, order, retEncoding))) {
     return retEncoding;
+  }
+  return {};
+}
+
+static Attribute inferDstEncoding(triton::gpu::Fp4ToFpOp op, Attribute srcEnc) {
+  Attribute dstEnc;
+  auto shape = op.getSrc().getType().getShape();
+  auto result =
+      srcEnc.getDialect()
+          .getRegisteredInterface<triton::DialectInferLayoutInterface>()
+          ->inferFp4ToFpOpEncoding(shape, op.getAxis(), srcEnc, dstEnc,
+                                   /*fwdInference*/ true, std::nullopt);
+  assert(succeeded(result));
+  return dstEnc;
+}
+
+static Attribute inferSrcEncoding(triton::gpu::Fp4ToFpOp op, Attribute dstEnc) {
+  Attribute srcEnc;
+  auto shape = op.getSrc().getType().getShape();
+  if (succeeded(
+          dstEnc.getDialect()
+              .getRegisteredInterface<triton::DialectInferLayoutInterface>()
+              ->inferFp4ToFpOpEncoding(shape, op.getAxis(), dstEnc, srcEnc,
+                                       /*fwdInference*/ false, std::nullopt))) {
+    return srcEnc;
   }
   return {};
 }
@@ -494,6 +528,8 @@ Attribute inferSrcEncoding(Operation *op, Attribute encoding) {
     return inferSrcEncoding(reshape, encoding);
   if (auto gather = dyn_cast<triton::GatherOp>(op))
     return inferSrcEncoding(gather, encoding);
+  if (auto fp4ToFp = dyn_cast<triton::gpu::Fp4ToFpOp>(op))
+    return inferSrcEncoding(fp4ToFp, encoding);
 
   return {};
 }
@@ -523,6 +559,8 @@ Attribute inferDstEncoding(Operation *op, Attribute encoding) {
     return inferDstEncoding(reshape, encoding);
   if (auto gather = dyn_cast<triton::GatherOp>(op))
     return inferDstEncoding(gather, encoding);
+  if (auto fp4ToFp = dyn_cast<triton::gpu::Fp4ToFpOp>(op))
+    return inferDstEncoding(fp4ToFp, encoding);
 
   return {};
 }
@@ -540,7 +578,7 @@ bool isExpensiveLoadOrStore(Operation *op) {
   // we can presume a high hit-rate that makes it cheap to load
   auto ptrType = cast<RankedTensorType>(op->getOperand(0).getType());
   auto mod = op->getParentOfType<ModuleOp>();
-  int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(mod);
+  int numWarps = triton::gpu::lookupNumWarps(op);
   int threadsPerWarp = triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
   if (ptrType.getNumElements() < numWarps * threadsPerWarp)
     return false;
@@ -703,14 +741,14 @@ scf::IfOp replaceIfOpWithNewSignature(
   // Create a new loop before the existing one, with the extra operands.
   auto resultTypes = llvm::to_vector<4>(ifOp.getResults().getTypes());
   resultTypes.append(newResultTypes.begin(), newResultTypes.end());
-  scf::IfOp newIf = rewriter.create<scf::IfOp>(
-      ifOp.getLoc(), resultTypes, ifOp.getCondition(), /*withElse=*/true);
+  scf::IfOp newIf = rewriter.create<scf::IfOp>(ifOp.getLoc(), resultTypes,
+                                               ifOp.getCondition());
   newIf->setAttrs(ifOp->getAttrs());
 
-  rewriter.inlineBlockBefore(ifOp.thenBlock(), newIf.thenBlock(),
-                             newIf.thenBlock()->begin());
-  rewriter.inlineBlockBefore(ifOp.elseBlock(), newIf.elseBlock(),
-                             newIf.elseBlock()->begin());
+  newIf.getThenRegion().takeBody(ifOp.getThenRegion());
+  newIf.getElseRegion().takeBody(ifOp.getElseRegion());
+  scf::IfOp::ensureTerminator(newIf.getThenRegion(), rewriter, ifOp.getLoc());
+  scf::IfOp::ensureTerminator(newIf.getElseRegion(), rewriter, ifOp.getLoc());
 
   for (auto it : llvm::zip(ifOp.getResults(),
                            newIf.getResults().take_front(ifOp.getNumResults())))
@@ -803,11 +841,10 @@ LogicalResult getConvertBackwardSlice(
   auto updateLayout = [&](Value value, Attribute encoding) {
     assert((isa<RankedTensorType>(value.getType())));
     slice.insert(value);
-    if (layout.find(value) != layout.end()) {
-      if (layout[value] != encoding)
-        return failure();
-    }
-    layout[value] = encoding;
+    Attribute &existing = layout[value];
+    if (existing && existing != encoding)
+      return failure();
+    existing = encoding;
     return success();
   };
 
@@ -833,6 +870,8 @@ LogicalResult getConvertBackwardSlice(
     }
 
     if (auto ifOp = currentValue.getDefiningOp<scf::IfOp>()) {
+      if (stopPropagation && stopPropagation(ifOp))
+        continue;
       unsigned argIdx = mlir::cast<OpResult>(currentValue).getResultNumber();
 
       OpOperand &thenValue = ifOp.thenYield()->getOpOperand(argIdx);
@@ -962,11 +1001,9 @@ bool isPureUnaryInlineAsm(Operation *op) {
 }
 
 int getNVIDIAComputeCapability(Operation *module) {
-  assert(module->hasAttr(triton::AttrTargetName) &&
-         "Expected a target attribute on the module operation");
-
   StringAttr targetAttr =
-      module->getAttrOfType<StringAttr>(triton::AttrTargetName);
+      module->getAttrOfType<StringAttr>(triton::gpu::AttrTargetName);
+  assert(targetAttr && "Expected a target attribute on the module operation");
 
   StringRef ref = targetAttr.strref();
   assert(ref.starts_with("cuda:") &&
@@ -982,11 +1019,9 @@ int getNVIDIAComputeCapability(Operation *module) {
 }
 
 StringRef getAMDArch(Operation *module) {
-  assert(module->hasAttr(triton::AttrTargetName) &&
-         "Expected a target attribute on the module operation");
-
   StringAttr targetAttr =
-      module->getAttrOfType<StringAttr>(triton::AttrTargetName);
+      module->getAttrOfType<StringAttr>(triton::gpu::AttrTargetName);
+  assert(targetAttr && "Expected a target attribute on the module operation");
 
   StringRef ref = targetAttr.strref();
   assert(ref.starts_with("hip:") &&
@@ -1042,38 +1077,6 @@ getSharedEncIfAllUsersAreDotEnc(Value val, bool &incompatible) {
     attr = tempAttr;
   }
   return attr;
-}
-
-bool canUseMMAv3Pipelining(Operation *loadOp) {
-  Operation *user = *loadOp->getUsers().begin();
-  while (isa<triton::TransOp, triton::ReshapeOp>(user)) {
-    if (!user->hasOneUse())
-      return false;
-    user = *user->getUsers().begin();
-  }
-  if (!user)
-    return false;
-
-  if (auto alloc = dyn_cast<ttg::LocalAllocOp>(user)) {
-    auto sharedEnc =
-        dyn_cast<ttg::NVMMASharedEncodingAttr>(alloc.getType().getEncoding());
-
-    if (!sharedEnc)
-      return false;
-
-    // MMA V3 case.
-    SmallVector<unsigned> newOrder = getOrder(sharedEnc);
-    auto ty = cast<RankedTensorType>(loadOp->getResultTypes()[0]);
-    auto oldOrder = ttg::getOrder(ty.getEncoding());
-
-    // The operand of MMAv3 is in SharedEncoding and its order should not
-    // be changed after FuseTranspositions Pass. So we only pipeline the
-    // load if the order of the loaded BlockedEncoding is the same as the
-    // order of the SharedEncoding it is converted to.
-    return oldOrder == newOrder;
-  } else {
-    return false;
-  }
 }
 
 namespace {

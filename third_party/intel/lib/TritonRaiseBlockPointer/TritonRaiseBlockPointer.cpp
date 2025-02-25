@@ -13,9 +13,11 @@
 #include "mlir/Support/LLVM.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 #include <optional>
 #include <set>
 
@@ -100,10 +102,17 @@ Value findOrCreateMakeTensorPtr(Location loc, Value source, ValueRange shape,
     return false;
   });
 
+  // Note: We are forcing the shape to be unknown to pointer increments that may
+  // wrap around (via the tt.advance operation).
+  Value zero = findOrCreateConstant(loc, 0, shapeAndStridesBitwidth, builder);
+  SmallVector<Value> zeros;
+  for (int i = 0; i < shape.size(); ++i)
+    zeros.push_back(zero);
+
   return (it != insertPoint)
              ? cast<tt::MakeTensorPtrOp>(*it)
              : builder.createOrFold<tt::MakeTensorPtrOp>(
-                   loc, source, shape, strides, offsets, sizes, order);
+                   loc, source, zeros, strides, offsets, sizes, order);
 }
 
 Value getFinalValue(Value value) {
@@ -372,14 +381,65 @@ struct PtrState {
                                      newOffsets, order, sizes, builder);
   }
 
-  Value createTTAdvanceOp(Value ptr, tt::MakeTensorPtrOp makeTPtrOp,
-                          OpBuilder &builder, Location loc) const {
+  std::optional<Value> createTTAdvanceOp(Value ptr,
+                                         tt::MakeTensorPtrOp makeTPtrOp,
+                                         OpBuilder &builder,
+                                         Location loc) const {
     assert(triton::isTensorPointerType(ptr.getType()) &&
            "Expecting a block ptr");
     SmallVector<Value> newOffsets;
-    for (const auto &[offset, stride] :
-         llvm::zip(offsets, makeTPtrOp.getStrides()))
-      newOffsets.push_back(computeOffset(offset, stride, builder, loc));
+
+    // We need to generate a `tt.advance` operation as follows:
+    //   tt.advance ptr, (x0, x1)
+    // where:
+    //   x0 = off0 / (stride0 * stride0)
+    //   x1 = off1 / stride1
+    // The integer the divisions above are correct only if `num % denom == 0`,
+    // therefore we give up if none of the strides is one.
+
+    bool noStrideIsOne = llvm::all_of(makeTPtrOp.getStrides(), [&](Value str) {
+      return !ttgi::isConstant(getFinalValue(str), 1);
+    });
+    if (noStrideIsOne)
+      return std::nullopt;
+
+    // We can generate a tt.advance operation as follow:
+    //   Case 1: all offsets are non-zero ==> all strides must be one
+    //   Case 2: one offset is zero
+    //     2a) offsets: (0, off1) strides: (*, 1) ==> tt.advance ptr, (0, off1)
+    //     2b) offsets: (off0, 0) strides: (*, 1) ==> tt.advance ptr, (0, off0)
+
+    bool allOffsetsNotZero = llvm::all_of(offsets, [&](Value offset) {
+      return !ttgi::isConstant(getFinalValue(offset), 0);
+    });
+
+    // Case 1: all offsets are non-zero.
+    if (allOffsetsNotZero) {
+      assert(offsets.size() == 1 &&
+             "TODO: can we generate tt.advance ptr, (0, off0*str0 + off1) ?");
+
+      if (llvm::any_of(makeTPtrOp.getStrides(), [&](Value stride) {
+            return !ttgi::isConstant(getFinalValue(stride), 1);
+          }))
+        return std::nullopt;
+
+      for (Value offset : offsets)
+        newOffsets.push_back(offset);
+
+      return builder.createOrFold<tt::AdvanceOp>(loc, ptr.getType(), ptr,
+                                                 newOffsets);
+    }
+
+    // Case 2: at least one offset is zero.
+    assert(offsets.size() == 2 && "Expecting two offsets");
+    bool zeroIdx = !ttgi::isConstant(getFinalValue(offsets[0]), 0);
+    Value nonZeroOffset = offsets[!zeroIdx];
+    Value zeroOffset = offsets[zeroIdx];
+
+    if (ttgi::isConstant(getFinalValue(makeTPtrOp.getStrides()[0]), 1))
+      newOffsets = {nonZeroOffset, zeroOffset};
+    else
+      newOffsets = {zeroOffset, nonZeroOffset};
 
     return builder.createOrFold<tt::AdvanceOp>(loc, ptr.getType(), ptr,
                                                newOffsets);
@@ -429,6 +489,236 @@ static llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
 }
 #endif
 
+// Utility class aggregating information required to create a versioning
+// condition.
+class VersioningCondition {
+public:
+  VersioningCondition(Value S, Value BS) : S(S), BS(BS) {
+    assert(isValid() && "Invalid values supplied");
+  }
+
+  // Create the condition: (S % BS == 0 && S > BS)
+  Value materialize(OpBuilder &builder, Location loc) const {
+    assert(S && BS && "Expecting valid values");
+    Value zero =
+        builder.createOrFold<arith::ConstantIntOp>(loc, 0, S.getType());
+    Value cmp1 = builder.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::eq,
+        builder.create<arith::RemSIOp>(loc, S, BS), zero);
+    Value cmp2 =
+        builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt, S, BS);
+    return builder.create<arith::AndIOp>(loc, cmp1, cmp2);
+  }
+
+private:
+  bool isValid() const {
+    Type SType = S.getType(), BSType = BS.getType();
+    if (!isa<IntegerType>(SType) || !isa<IntegerType>(BSType))
+      return false;
+
+    return cast<IntegerType>(SType).getWidth() ==
+           cast<IntegerType>(BSType).getWidth();
+  }
+
+  Value S;  // The length of a row/column.
+  Value BS; // The block size.
+};
+
+// Utility class responsible for collecting masked operation in a loop that are
+// amenable to having their mask dropped when the loop is versioned.
+class MaskedOpsCollector {
+  friend class LoopVersioner;
+
+public:
+  bool collectMaskedOps(scf::ForOp &forOp) {
+    // Nested loop aren't currently handled.
+    if (forOp->template getParentOfType<scf::ForOp>())
+      return false;
+
+    // Ensure the loop upper bound is in canonical form (N+END-1)/END.
+    if (!hasValidUpperBound(forOp))
+      return false;
+
+    assert(versioningCond && "Expecting a valid versioning condition");
+
+    // Collect masked loads in the loop if they have canonical mask.
+    for (auto op : forOp.getOps<tt::LoadOp>()) {
+      Value mask = op.getMask();
+      if (mask && isValidMask(getFinalValue(mask)))
+        maskedOps.insert(op);
+    }
+
+    // TODO: collect masked stores in the loop if they have canonical mask.
+
+    return maskedOps.size();
+  }
+
+private:
+  // Check whether the loop UB is in canonical form: (N+END-1)/END and create
+  // the versioning condition to use for the loop if so.
+  bool hasValidUpperBound(scf::ForOp &forOp) {
+    Value ub = getFinalValue(forOp.getUpperBound());
+    Operation *defOp = ub.getDefiningOp();
+    if (!defOp || !isa<arith::DivSIOp>(defOp))
+      return false;
+
+    auto divOp = cast<arith::DivSIOp>(defOp);
+    Operation *divLhsOp = divOp.getLhs().getDefiningOp();
+    Operation *divRhsOp = divOp.getRhs().getDefiningOp();
+    if (!divLhsOp || !divRhsOp || !isa<arith::AddIOp>(divLhsOp) ||
+        !isa<arith::ConstantOp>(divRhsOp))
+      return false;
+
+    auto divNumOp = cast<arith::AddIOp>(divLhsOp);
+    auto divDenOp = cast<arith::ConstantIntOp>(divRhsOp);
+    Operation *addLhsOp = divNumOp.getLhs().getDefiningOp();
+    Operation *addRhsOp = divNumOp.getRhs().getDefiningOp();
+    if (addLhsOp || !isa<arith::ConstantIntOp>(addRhsOp) ||
+        (divDenOp.value() != cast<arith::ConstantIntOp>(addRhsOp).value() + 1))
+      return false;
+
+    versioningCond = std::make_unique<VersioningCondition>(divNumOp.getLhs(),
+                                                           divOp.getRhs());
+    return true;
+  }
+
+  // Check whether a mask is in canonical form: (0..END) < N - i*END
+  bool isValidMask(Value mask) const {
+    assert(mask.getDefiningOp() && "Expected a valid mask operation");
+    auto cmpOp = cast<arith::CmpIOp>(mask.getDefiningOp());
+    arith::CmpIPredicate pred = cmpOp.getPredicate();
+    if (pred != arith::CmpIPredicate::slt)
+      return false;
+
+    Operation *lhs = getFinalValue(cmpOp.getLhs()).getDefiningOp();
+    Operation *rhs = getFinalValue(cmpOp.getRhs()).getDefiningOp();
+    if (!isa<tt::MakeRangeOp>(lhs) || !isa<arith::SubIOp>(rhs))
+      return false;
+
+    auto rangeOp = cast<tt::MakeRangeOp>(lhs);
+    unsigned end = rangeOp.getEnd();
+    assert(end > rangeOp.getStart() && "Invalid range");
+
+    auto subOp = cast<arith::SubIOp>(rhs);
+    Operation *subLhs = subOp.getLhs().getDefiningOp();
+    Operation *subRhs = subOp.getRhs().getDefiningOp();
+    if (subLhs || !isa<arith::MulIOp>(subRhs))
+      return false;
+
+    auto mulOp = cast<arith::MulIOp>(subRhs);
+    Operation *mulLhs = mulOp.getLhs().getDefiningOp();
+    Operation *mulRhs = mulOp.getRhs().getDefiningOp();
+    if (mulLhs && mulRhs)
+      return false;
+
+    if (!mulLhs && isa<arith::ConstantIntOp>(mulRhs))
+      return cast<arith::ConstantIntOp>(mulRhs).value() == end;
+    if (!mulRhs && isa<arith::ConstantIntOp>(mulLhs))
+      return cast<arith::ConstantIntOp>(mulLhs).value() == end;
+
+    return false;
+  }
+
+private:
+  using MaskedOperations = SmallPtrSet<Operation *, 8>;
+  // Masked operations in the loop that can be have their mask dropped when the
+  // loop is versioned using the condition builder associated with this class.
+  MaskedOperations maskedOps;
+  std::unique_ptr<VersioningCondition> versioningCond = nullptr;
+};
+
+class LoopVersioner {
+public:
+  // TODO: Extend the versioning region to encompass the downward exposed uses
+  // of the return values.
+  bool version(scf::ForOp &forOp, MaskedOpsCollector &collector) const {
+    if (!canVersion(forOp))
+      return false;
+
+    // Collect loop results that are downward exposed.
+    auto getUsedResults = [](const scf::ForOp &forOp) {
+      SmallVector<Type> resTypes;
+      for (Value res : forOp->getResults()) {
+        if (!res.getUsers().empty())
+          resTypes.push_back(res.getType());
+      }
+      return resTypes;
+    };
+
+    // Create the versioning condition.
+    OpBuilder builder(forOp);
+    Location loc = forOp.getLoc();
+    Value versioningCond = collector.versioningCond->materialize(builder, loc);
+    auto ifOp =
+        builder.create<scf::IfOp>(loc, getUsedResults(forOp), versioningCond,
+                                  /*withThenRegion=*/true,
+                                  /*withElseRegion=*/true);
+
+    // Clone the original loop into the 2 if branches.
+    OpBuilder thenB = ifOp.getThenBodyBuilder();
+    OpBuilder elseB = ifOp.getElseBodyBuilder();
+
+    IRMapping map;
+    Operation *thenForLoop = thenB.clone(*forOp.getOperation(), map);
+    Operation *elseForLoop = elseB.clone(*forOp.getOperation());
+
+    // Collect results in 'clonedLoop' corresponding to downward exposed results
+    // 'forOp'.
+    auto pruneUnusedResults = [&](const scf::ForOp &forOp,
+                                  Operation *clonedLoop) {
+      SmallVector<Value> prunedResults;
+      for (auto [idx, val] : llvm::enumerate(forOp->getResults())) {
+        if (!val.getUsers().empty())
+          prunedResults.push_back(clonedLoop->getResult(idx));
+      }
+      return prunedResults;
+    };
+
+    // Create the yield operations for the two if branches.
+    thenB.create<scf::YieldOp>(loc, pruneUnusedResults(forOp, thenForLoop));
+    elseB.create<scf::YieldOp>(loc, pruneUnusedResults(forOp, elseForLoop));
+
+    // Drop the mask from candidate masked operations in the "then" region's
+    // cloned loop.
+    for (Operation *maskedOp : collector.maskedOps) {
+      Operation *mappedOp = map.lookup(maskedOp);
+      if (auto loadOp = dyn_cast<tt::LoadOp>(mappedOp)) {
+        OpBuilder builder(mappedOp);
+        auto newLoad = builder.create<tt::LoadOp>(
+            loadOp.getLoc(), loadOp.getPtr(), loadOp.getCache(),
+            loadOp.getEvict(), loadOp.getIsVolatile());
+        mappedOp->replaceAllUsesWith(newLoad);
+        mappedOp->erase();
+      }
+      // TODO: stores
+    }
+
+    // Replace the uses of the original loop results.
+    unsigned idx = 0;
+    for (Value res : forOp.getResults()) {
+      if (!res.getUsers().empty())
+        res.replaceAllUsesWith(ifOp->getResult(idx++));
+    }
+
+    forOp.erase();
+
+    return true;
+  }
+
+private:
+  // Currently we can version the loop only is it doesn't have downward
+  // exposed uses of return values that are a tensor of pointers.
+  // Note: this is due to the fact the results yielded by the 2 versioning
+  // branches have different types for ptr (only in one versioned loop tensor of
+  // ptrs are changed to block ptrs) 'then' part of the versioning branch and
+  // leave them as is in the 'else' branch).
+  bool canVersion(scf::ForOp &forOp) const {
+    return llvm::any_of(forOp.getResults(), [](Value res) {
+      return !tt::isTensorPointerType(res.getType()) || res.getUsers().empty();
+    });
+  }
+};
+
 struct TritonRaiseBlockPointer
     : tt::intel::impl::TritonRaiseBlockPointerBase<TritonRaiseBlockPointer> {
 public:
@@ -437,9 +727,35 @@ public:
 
   void runOnOperation() final {
     ModuleOp moduleOp = getOperation();
+
+    // Drop the mask or version loops containing masked operations.
+    if (IgnoreMasks)
+      dropMasks(moduleOp);
+    else {
+      // Collect masked operations amenable to versioning in each loop.
+      moduleOp->walk<WalkOrder::PreOrder>([&](Operation *op) {
+        MaskedOpsCollector collector;
+        LoopVersioner loopVersioner;
+        if (scf::ForOp forOp = dyn_cast<scf::ForOp>(op)) {
+          if (collector.collectMaskedOps(forOp)) {
+            [[maybe_unused]] bool loopVersioned =
+                loopVersioner.version(forOp, collector);
+            if (loopVersioned)
+              LLVM_DEBUG(llvm::dbgs() << "Loop versioned\n");
+          }
+        }
+        return WalkResult::advance();
+      });
+
+      LLVM_DEBUG(llvm::dbgs() << "After versioning:\n" << moduleOp << "\n");
+      assert(succeeded(verify(moduleOp)) && "Module verification failed");
+    }
+
+    // Perform the transformation.
     if (failed(rewriteOp(moduleOp)))
       moduleOp->emitWarning("TritonRaiseToBlockPointer failed");
 
+    // Cleanup unused operations.
     for (Operation *op : cleanUp) {
       if (op->getUsers().empty())
         op->erase();
@@ -448,24 +764,31 @@ public:
     assert(succeeded(verify(moduleOp)) && "Module verification failed");
   }
 
-  LogicalResult rewriteOp(Operation *rootOp) {
+private:
+  LogicalResult rewriteOp(Operation *rootOp, bool isNested = false) {
     assert(rootOp && "Expected a valid operation");
 
+    bool fail = false;
     rootOp->walk<WalkOrder::PreOrder>([&](Operation *op) {
       if (op == rootOp)
         return WalkResult::advance();
 
       return TypeSwitch<Operation *, WalkResult>(op)
-          .Case([this](tt::AddPtrOp addptr) {
-            if (failed(rewriteAddPtrOp(addptr)))
+          .Case([&](tt::AddPtrOp addptr) {
+            if (failed(rewriteAddPtrOp(addptr))) {
               addptr->emitRemark(
                   "TritonRaiseToBlockPointer: Failed to rewrite AddPtrOp");
+              if (isNested)
+                fail = true;
+            }
             return WalkResult::advance();
           })
-          .Case<tt::LoadOp, tt::StoreOp>([this](auto loadstore) {
+          .Case<tt::LoadOp, tt::StoreOp>([&](auto loadstore) {
             if (failed(rewriteLoadStoreOp(loadstore))) {
               loadstore->emitRemark(
                   "TritonRaiseToBlockPointer: Failed to rewrite load/store");
+              if (isNested)
+                fail = true;
               return WalkResult::advance();
             }
             return WalkResult::skip();
@@ -474,12 +797,17 @@ public:
             if (failed(rewriteForOp(forOp))) {
               forOp->emitRemark(
                   "TritonRaiseToBlockPointer: Failed to rewrite ForOp");
+              if (isNested)
+                fail = true;
               return WalkResult::advance();
             }
             return WalkResult::skip();
           })
           .Default([&](auto) { return WalkResult::advance(); });
     });
+
+    if (fail)
+      return failure();
 
     return success();
   }
@@ -501,8 +829,12 @@ public:
 
     auto canBeRewrittenUsingBlockPtr = [&](Operation *op) {
       return TypeSwitch<Operation *, bool>(op)
-          .Case<tt::AddPtrOp, tt::LoadOp, tt::StoreOp>(
-              [](auto) { return true; })
+          .Case<tt::AddPtrOp>([](auto) { return true; })
+          .Case<tt::LoadOp>(
+              [this](auto loadOp) { return IgnoreMasks || !loadOp.getMask(); })
+          .Case<tt::StoreOp>([this](auto storeOp) {
+            return IgnoreMasks || !storeOp.getMask();
+          })
           .Default([](auto) { return false; });
     };
 
@@ -554,7 +886,8 @@ public:
       ptrMap.map(newOp.getRegionIterArgs()[i], mappedV);
 
     // Update the loop body.
-    if (failed(rewriteOp(newOp))) {
+    constexpr bool isNested = true;
+    if (failed(rewriteOp(newOp, isNested))) {
       newOp->erase();
       op->emitRemark("TritonRaiseToBlockPointer: update loop body failed when "
                      "rewriting for op");
@@ -682,6 +1015,8 @@ public:
     Location loc = op.getLoc();
     Value ptr = op.getPtr();
 
+    LLVM_DEBUG(llvm::dbgs() << "Rewriting: " << *op << "\n");
+
     // Case 1: the ptr has been already been mapped.
     if (Value mappedV = ptrMap.lookupOrNull(ptr)) {
       // Case 1a: the ptr has been mapped to a make_tensor_ptr operation.
@@ -691,18 +1026,22 @@ public:
           return failure();
 
         Value basePtr = tt::isTensorPointerType(ptr.getType()) ? ptr : mappedV;
-        auto advanceOp =
+        std::optional<Value> advanceOp =
             state.createTTAdvanceOp(basePtr, makeTPtrOp, builder, loc);
+        if (!advanceOp.has_value()) {
+          LLVM_DEBUG(llvm::dbgs() << "Rewriting failed for: " << *op << "\n");
+          return failure();
+        }
 
         cleanUp.insert(op);
-        ptrMap.map(op.getResult(), advanceOp);
+        ptrMap.map(op.getResult(), *advanceOp);
 
         LLVM_DEBUG({
+          llvm::dbgs() << "Rewrote:\n\t" << op << "\nto:\n\t" << advanceOp
+                       << "\n";
           auto modOp =
               builder.getBlock()->getParentOp()->getParentOfType<ModuleOp>();
           llvm::dbgs() << "Module:\n" << modOp << "\n";
-          llvm::dbgs() << "Rewrote:\n\t" << op << "\nto:\n\t" << advanceOp
-                       << "\n";
         });
 
         return success();
@@ -724,11 +1063,15 @@ public:
         auto makeTPtrOp = ptr.getDefiningOp<tt::MakeTensorPtrOp>();
         assert(makeTPtrOp && "Expected a MakeTensorPtrOp");
 
-        Value newAdvanceOp = state.createTTAdvanceOp(advanceOp.getResult(),
-                                                     makeTPtrOp, builder, loc);
+        std::optional<Value> newAdvanceOp = state.createTTAdvanceOp(
+            advanceOp.getResult(), makeTPtrOp, builder, loc);
+        if (!newAdvanceOp.has_value()) {
+          LLVM_DEBUG(llvm::dbgs() << "Rewriting failed for: " << *op << "\n");
+          return failure();
+        }
 
         cleanUp.insert(op);
-        ptrMap.map(op.getResult(), newAdvanceOp);
+        ptrMap.map(op.getResult(), *newAdvanceOp);
 
         LLVM_DEBUG({
           llvm::dbgs() << "Rewrote:\n\t" << op << "\nto:\n\t" << newAdvanceOp
@@ -747,17 +1090,22 @@ public:
     // Case 2: the ptr has not previously been mapped.
     // If the addptr operation increments a scalar pointer, give up.
     Value result = op.getResult();
-    if (!isa<RankedTensorType>(result.getType()))
+    if (!isa<RankedTensorType>(result.getType())) {
+      LLVM_DEBUG(llvm::dbgs() << "Rewriting failed for: " << *op << "\n");
       return failure();
+    }
 
-    // Otherwise, rewrite the AddPtrOp.
+    // Otherwise, attempt to rewrite the AddPtrOp into a MakeTensorPtrOp.
     PtrState state;
-    if (failed(visitOperandAddptr(op, state, loc, builder)))
+    if (failed(visitOperandAddptr(op, state, loc, builder))) {
+      LLVM_DEBUG(llvm::dbgs() << "Rewriting failed for: " << *op << "\n");
       return failure();
+    }
+
+    assert(!state.isBlockPtr() && "Expected tensor of pointers");
 
     knownPtrs[result] = state;
 
-    assert(isa<RankedTensorType>(result.getType()));
     Value makePtrOp = state.createTTMakeTensorPtrOp(builder, loc);
     knownPtrs[makePtrOp] = std::move(state);
 
@@ -966,10 +1314,8 @@ public:
                        bool> = true>
   LogicalResult rewriteLoadStoreOp(OpTy op) {
     // If the pointer is already a block pointer, there is nothing to do.
-    if (tt::isTensorPointerType(op.getPtr().getType())) {
-      LLVM_DEBUG(llvm::dbgs() << "Ptr is a tensor\n");
+    if (tt::isTensorPointerType(op.getPtr().getType()))
       return success();
-    }
 
     // If the pointer doesn't have a corresponding block pointer, there is
     // nothing to do.
@@ -1030,6 +1376,52 @@ public:
     });
 
     return success();
+  }
+
+  void dropMasks(ModuleOp moduleOp) const {
+    assert(IgnoreMasks && "Expecting 'IgnoreMask' flag to be set");
+
+    SmallVector<Operation *> opsWithMask;
+    moduleOp->walk<WalkOrder::PreOrder>([&](Operation *op) {
+      TypeSwitch<Operation *>(op)
+          .Case<tt::LoadOp, tt::StoreOp>([&](auto opWithMask) {
+            if (opWithMask.getMask()) {
+              opsWithMask.push_back(opWithMask);
+            }
+            return WalkResult::advance();
+          })
+          .Default([&](auto) { return WalkResult::advance(); });
+    });
+
+    for (Operation *op : opsWithMask) {
+      TypeSwitch<Operation *>(op)
+          .Case<tt::LoadOp>([&](auto loadOp) {
+            loadOp->emitWarning("TritonRaiseBlockPointer: ignoring mask");
+            OpBuilder builder(loadOp);
+            auto newLoadOp = builder.create<tt::LoadOp>(
+                loadOp.getLoc(), loadOp.getPtr(), loadOp.getBoundaryCheck(),
+                loadOp.getPadding(), loadOp.getCache(), loadOp.getEvict(),
+                loadOp.getIsVolatile());
+            loadOp->replaceAllUsesWith(newLoadOp);
+            loadOp->erase();
+          })
+          .Case<tt::StoreOp>([&](auto storeOp) {
+            storeOp->emitWarning("TritonRaiseBlockPointer: ignoring mask");
+            OpBuilder builder(storeOp);
+            auto newStoreOp = builder.createOrFold<tt::StoreOp>(
+                storeOp.getLoc(), storeOp.getPtr(), storeOp.getValue(),
+                storeOp.getBoundaryCheck(), storeOp.getCache(),
+                storeOp.getEvict());
+
+            Operation *maskOpToErase = nullptr;
+            if (storeOp.getMask().hasOneUse())
+              maskOpToErase = storeOp.getMask().getDefiningOp();
+
+            storeOp->erase();
+            if (maskOpToErase)
+              maskOpToErase->erase();
+          });
+    }
   }
 
   static void dump(const IRMapping &map) {
@@ -1115,6 +1507,7 @@ LogicalResult TritonRaiseBlockPointer::visitAddPointerRemOperand(
     return failure();
   }
 
+  LLVM_DEBUG(llvm::dbgs().indent(2) << "RemOp state: " << state << "\n";);
   return success();
 }
 
@@ -1284,6 +1677,7 @@ LogicalResult TritonRaiseBlockPointer::visitAddPointerOperand(
   for (int dim : resultType.getShape())
     state.sizes.push_back(dim);
 
+  LLVM_DEBUG(llvm::dbgs().indent(2) << "ConstantOp state: " << state << "\n";);
   return success();
 }
 
