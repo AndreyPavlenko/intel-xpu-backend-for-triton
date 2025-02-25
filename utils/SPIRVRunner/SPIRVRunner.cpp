@@ -66,6 +66,7 @@ struct KernelArguments {
   std::string kernel_name;
   std::string build_flags;
   std::string spv_name;
+  bool is_spv;
   ordered_json jsonData;
   std::vector<char *> dev_buffers;
   std::vector<TensorBuffer> host_outbuffers;
@@ -103,6 +104,7 @@ struct KernelArguments {
     build_flags = jsonData.at("build_flags");
     spv_name =
         spirv_dump_dir + "/" + jsonData.at("spv_name").get<std::string>();
+    is_spv = jsonData.at("is_spv");
     out_tensor_names = outtensornames;
   }
 };
@@ -151,7 +153,7 @@ sycl::context get_default_context(const sycl::device &sycl_device) {
 std::tuple<sycl::kernel_bundle<sycl::bundle_state::executable>, sycl::kernel,
            int32_t, int32_t>
 loadBinary(const std::string &kernel_name, const std::string &build_flags,
-           uint8_t *binary_ptr, const size_t binary_size,
+           bool is_spv, uint8_t *binary_ptr, const size_t binary_size,
            const size_t deviceId) {
   int32_t n_regs = 0;
   int32_t n_spills = 0;
@@ -169,8 +171,9 @@ loadBinary(const std::string &kernel_name, const std::string &build_flags,
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(sycl_device);
   const auto l0_context =
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(ctx);
-  auto l0_module = checkSyclErrors(create_module(
-      l0_context, l0_device, binary_ptr, binary_size, build_flags.c_str()));
+  auto l0_module =
+      checkSyclErrors(create_module(l0_context, l0_device, binary_ptr,
+                                    binary_size, build_flags.c_str(), is_spv));
   auto l0_kernel = checkSyclErrors(create_function(l0_module, kernel_name));
 
   ze_kernel_properties_t props;
@@ -377,6 +380,10 @@ void validate_results(std::vector<TensorBuffer> &output_tensors,
     }
 
     if (!torch::allclose(expected_tensor, actual_tensor)) {
+      std::cout << "FAILED! Mismatch with " << expected_outputs
+                << std::endl;
+      std::cout << "Actual result:\n" << actual_tensor << std::endl;
+      std::cout << "Expected result:\n" << expected_tensor << std::endl;
       throw std::runtime_error("Tensors are not close enough");
     }
   }
@@ -478,6 +485,7 @@ int main(int argc, char **argv) {
 
     auto [kernel_bundle, kernel, n_regs, n_spills] =
         loadBinary(tritonArgDict.kernel_name, tritonArgDict.build_flags,
+                   tritonArgDict.is_spv,
                    reinterpret_cast<uint8_t *>(spirv.data()), spirv.size(), 0);
 
     // TODO: missing number of registers

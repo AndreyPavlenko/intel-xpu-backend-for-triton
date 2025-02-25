@@ -236,6 +236,9 @@ def compile_module_from_src(src, name):
 
 
 class XPUUtils(object):
+    # This map holds loaded kernels in case we want to create
+    # a reproducer
+    LOADED_KERNELS = {}
 
     def __new__(cls):
         if not hasattr(cls, "instance"):
@@ -251,6 +254,15 @@ class XPUUtils(object):
         self.device_count = mod.init_devices(self.get_sycl_queue())
         self.current_device = 0 if self.device_count[0] > 0 else -1
         self.wait_on_sycl_queue = mod.wait_on_sycl_queue
+
+        # Keep loaded binaries to make reproducers.
+        if os.getenv('TRITON_XPU_DUMP_SPIRV_KERNEL_ARGS', None):
+            def load_binary_and_keep(*args):
+                res = mod.load_binary(*args)
+                self.LOADED_KERNELS[res[1]] = args[1]
+                return res
+
+            self.load_binary = load_binary_and_keep
 
     def get_current_device(self):
         return self.current_device
@@ -585,7 +597,9 @@ def serialize_kernel_metadata(arg, args_dict):
     args_dict['threads_per_warp'] = arg.threads_per_warp
     args_dict['shared_memory'] = arg.shared
     args_dict['kernel_name'] = arg.name
-    args_dict['spv_name'] = f"{arg.name}.spv"
+    is_spv = not os.getenv("TRITON_XPU_GEN_NATIVE_CODE", False)
+    args_dict['is_spv'] = is_spv
+    args_dict['spv_name'] = f"{arg.name}.{'spv' if is_spv else 'xebin'}"
     args_dict['build_flags'] = arg.build_flags
 
 
@@ -632,6 +646,13 @@ def serialize_args(args, constants, signature):
                 args_dict['argument_list'].append(new_arg)
             counts['scalars'] += 1
         counts['karg_cnt'] += 1
+
+    # Dump kernel file
+    kernel_path = os.path.join(dir_path, args_dict['spv_name'])
+    utils = XPUUtils()
+    assert args[4] in utils.LOADED_KERNELS
+    with open(kernel_path, 'wb') as kernel_file:
+        kernel_file.write(utils.LOADED_KERNELS[args[4]])
 
     # Dump argument info as a JSON file
     json_path = os.path.join(dir_path, 'args_data.json')
