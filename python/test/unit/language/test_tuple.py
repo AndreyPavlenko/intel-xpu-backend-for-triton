@@ -54,9 +54,11 @@ def _tuple_assign(XPtrs, YPtrs, values):
 @pytest.mark.interpreter
 def test_assign(device):
     vals = (2., 3.)
-    x = tuple([torch.zeros((1, ), dtype=torch.float32, device=device) for _ in range(2)])
-    y = tuple([torch.zeros((1, ), dtype=torch.float32, device=device) for _ in range(3)])
+    x = tuple([torch.zeros((1, ), dtype=torch.float32).to(device) for _ in range(2)])
+    y = tuple([torch.zeros((1, ), dtype=torch.float32).to(device) for _ in range(3)])
     _tuple_assign[(1, )](x, y, vals)
+    x = tuple(t.cpu() for t in x)
+    y = tuple(t.cpu() for t in y)
     assert x[0] == vals[0]
     assert x[1] == vals[1]
     assert y[0] == vals[0]
