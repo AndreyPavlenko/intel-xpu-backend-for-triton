@@ -24,6 +24,52 @@ pip install triton
 
 Binary wheels are available for CPython 3.9-3.13.
 
+# Jaguar Shores development build
+
+Assuming the X1 environment setup.
+
+Generate a GitHub personal access token (see instruction at https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic)
+```shell
+# install gh & jq
+sudo apt-get install gh jq
+```
+
+This instruction uses a venv. This is optional, you can install dependencies into conda as well.
+Remove `--venv` option from all commands below if you are not using venv.
+```shell
+python -m venv .venv
+```
+
+Make sure you have these set for each new session:
+```shell
+source /opt/intel/oneapi/setvars.sh
+source /jgssim/jgssim-env.sh
+./.venv/bin/activate
+export PATH="$(realpath ../packages/llvm/bin):$PATH"
+```
+
+Log in with your gh access token when prompted by:
+```shell
+./scripts/compile-triton.sh --llvm --triton --venv
+```
+
+Install pytorch from the cached artifacts. This may ask you to authenticate via gh - follow the instructions in the tool.
+```shell
+./scripts/install-pytorch.sh --venv
+```
+
+Install tests requirements.
+```shell
+pip install -r scripts/requirements-test.txt
+# For the first time setup, you may have to reactivate your environment for pytest to pick up the new paths
+deactivate && source .venv/bin/activate
+```
+
+Now you should be able to run tests, e.g.:
+```shell
+pytest python/test/unit/language/test_core.py -k test_bin_op --device xpu -n 4
+```
+
 # Enabling Blackwell Support
 
 The main branch now features support for NVIDIA Blackwell GPUs using 5th
