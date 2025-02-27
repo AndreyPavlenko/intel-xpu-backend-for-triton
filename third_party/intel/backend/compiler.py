@@ -455,7 +455,7 @@ class XPUBackend(BaseBackend):
         return spirv
 
     @staticmethod
-    def make_xebin(src, metadata):
+    def make_pisa(src, metadata):
         # Find kernel names (there should only be one)
         names = re.findall(r"pisa_kernel void @(\w+)", src)
         assert len(names) == 1
@@ -463,7 +463,18 @@ class XPUBackend(BaseBackend):
         metadata["build_flags"] = ""
 
         llc, _ = _path_to_binary("llc")
-        cmd = [llc, "-march=xe", "-filetype=obj"]
+        cmd = [llc, "-march=pisa"]
+        try:
+            return subprocess.run(cmd, input=src.encode(), capture_output=True, check=True).stdout.decode()
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"`llc` failed with error code {e.returncode}\n"
+                               f"command: {' '.join(cmd)}\n"
+                               f"stderr:\n{e.stderr.decode()}")
+
+    @staticmethod
+    def make_xebin(src, metadata):
+        llc, _ = _path_to_binary("llc")
+        cmd = [llc, "-march=xe", "-x=pisa", "-filetype=obj"]
         try:
             return subprocess.run(cmd, input=src.encode(), capture_output=True, check=True).stdout
         except subprocess.CalledProcessError as e:
@@ -476,6 +487,7 @@ class XPUBackend(BaseBackend):
         stages["ttgir"] = lambda src, metadata: self.make_ttgir(src, metadata, options, self.properties, self.capability)
         stages["llir"] = lambda src, metadata: self.make_llir(src, metadata, options, self.capability)
         if self.capability >= Capability.XE4:
+            stages["pisa"] = lambda src, metadata: self.make_pisa(src, metadata)
             stages["xebin"] = lambda src, metadata: self.make_xebin(src, metadata)
         else:
             stages["spv"] = lambda src, metadata: self.make_spv(src, metadata, options)
