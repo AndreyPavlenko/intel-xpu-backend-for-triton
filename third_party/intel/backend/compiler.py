@@ -474,7 +474,11 @@ class XPUBackend(BaseBackend):
     @staticmethod
     def make_xebin(src, metadata):
         llc, _ = _path_to_binary("llc")
-        cmd = [llc, "-march=xe", "-x=pisa", "-filetype=obj"]
+        # FIXME: We need to get total number of registers from the target metadata.
+        # Alternatively, we might ask for an option in the compiler to specify number
+        # of warps and let the compiler manage HW resources appropriately.
+        max_grf_num = 512 // metadata['num_warps']
+        cmd = [llc, "-march=xe", "-x=pisa", "-filetype=obj", f"-total-grf-num={max_grf_num}"]
         try:
             return subprocess.run(cmd, input=src.encode(), capture_output=True, check=True).stdout
         except subprocess.CalledProcessError as e:
