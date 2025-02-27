@@ -4220,14 +4220,14 @@ def test_full(dtype_str, shape, device):
         'GENERATE_TEST_HERE': f"tl.full({shape}, 2, tl.{dtype_str})",
         'SHAPE': str(list(shape)),
     })
-    out_static = torch.zeros((128), dtype=dtype, device=device)
+    out_static = torch.zeros((128), dtype=dtype).to(device)
     kernel_static_patched[(1, )](out_static)
-    assert torch.all(out_static == 2)
+    assert torch.all(out_static.cpu() == 2)
 
     kernel_dynamic_patched = patch_kernel(kernel_dynamic, {'SHAPE': str(list(shape))})
-    out_dynamic = torch.zeros((128), dtype=dtype, device=device)
+    out_dynamic = torch.zeros((128), dtype=dtype).to(device)
     kernel_dynamic_patched[(1, )](out_dynamic, 2, getattr(triton.language, dtype_str))
-    assert torch.all(out_dynamic == 2)
+    assert torch.all(out_dynamic.cpu() == 2)
 
 
 @pytest.mark.parametrize("literal, dtype_str", [(1e+50, "f64"), (1e+10, "f32"), (1.0, "f32"), ('float("inf")', "f32"),
