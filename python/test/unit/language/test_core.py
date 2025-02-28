@@ -2051,11 +2051,13 @@ def test_join(device):
         z = tl.join(x, y)
         tl.store(Z + tl.arange(0, N)[:, None] * 2 + tl.arange(0, 2)[None, :], z)
 
-    x = torch.arange(0, 128, device=device).to(torch.int32)
-    y = torch.arange(-128, 0, device=device).to(torch.int32)
+    x = torch.arange(0, 128).to(torch.int32)
+    y = torch.arange(-128, 0).to(torch.int32)
     z_ref = torch.stack([x, y], dim=-1)
-    z = torch.zeros_like(z_ref)
-    kernel[(1, )](x, y, z, N=128)
+    z = torch.zeros_like(z_ref).to(device)
+    x_tri = x.to(device)
+    y_tri = y.to(device)
+    kernel[(1, )](x_tri, y_tri, z, N=128)
 
     np.testing.assert_equal(to_numpy(z_ref), to_numpy(z))
 
@@ -2071,9 +2073,9 @@ def test_join_scalars(device):
         tl.static_assert(z.shape == [2])
         tl.store(Z + tl.arange(0, 2), z)
 
-    x = torch.full([1], 42, device=device).to(torch.int32)
-    y = torch.full([1], 100, device=device).to(torch.int32)
-    z = torch.zeros([2], device=device)
+    x = torch.full([1], 42).to(torch.int32).to(device)
+    y = torch.full([1], 100).to(torch.int32).to(device)
+    z = torch.zeros([2]).to(device)
     kernel[(1, )](x, y, z)
 
     np.testing.assert_equal([42, 100], to_numpy(z))
@@ -2144,11 +2146,12 @@ def test_split(device):
         tl.store(Z1 + tl.arange(0, N // 2), z1)
         tl.store(Z2 + tl.arange(0, N // 2), z2)
 
-    x = torch.arange(0, 256, device=device).to(torch.int32).reshape((128, 2))
+    x = torch.arange(0, 256).to(torch.int32).reshape((128, 2))
     z1_ref, z2_ref = (x[:, 0], x[:, 1])
-    z1 = torch.zeros_like(z1_ref)
-    z2 = torch.zeros_like(z2_ref)
-    kernel[(1, )](x, z1, z2, N=256)
+    z1 = torch.zeros_like(z1_ref).to(device)
+    z2 = torch.zeros_like(z2_ref).to(device)
+    x_tri = x.to(device)
+    kernel[(1, )](x_tri, z1, z2, N=256)
 
     np.testing.assert_equal(to_numpy(z1_ref), to_numpy(z1))
     np.testing.assert_equal(to_numpy(z2_ref), to_numpy(z2))
@@ -2170,11 +2173,12 @@ def test_split_to_scalar(device):
         tl.store(Z2, z2)
 
     N = 2
-    x = torch.arange(0, N, device=device).reshape(N // 2, 2)
+    x = torch.arange(0, N).reshape(N // 2, 2)
     z1_ref, z2_ref = (x[:, 0], x[:, 1])
-    z1 = torch.zeros_like(z1_ref)
-    z2 = torch.zeros_like(z2_ref)
-    kernel[(1, )](x, z1, z2)
+    z1 = torch.zeros_like(z1_ref).to(device)
+    z2 = torch.zeros_like(z2_ref).to(device)
+    x_tri = x.to(device)
+    kernel[(1, )](x_tri, z1, z2)
 
     np.testing.assert_equal(to_numpy(z1_ref), to_numpy(z1))
     np.testing.assert_equal(to_numpy(z2_ref), to_numpy(z2))
@@ -6956,7 +6960,7 @@ def test_dtype(device):
         tl.static_assert(dtype_x == tl.constexpr(tl.int32))
         tl.static_assert(dtype_x == tl.int8 or (dtype_x == tl.int16 or dtype_x == tl.int32))
 
-    X = torch.zeros(1, dtype=torch.int32, device=device)
+    X = torch.zeros(1, dtype=torch.int32).to(device)
     kernel[(1, )](X)
 
 
