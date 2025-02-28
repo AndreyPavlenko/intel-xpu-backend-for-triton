@@ -6833,7 +6833,7 @@ def test_num_programs(device):
         tl.store(input + 2, num_programs_2)
 
     kernel[grid](input)
-    assert torch.all(input == torch.tensor(grid, device=device))
+    assert torch.all(input.cpu() == torch.tensor(grid))
 
 
 # -----------------------

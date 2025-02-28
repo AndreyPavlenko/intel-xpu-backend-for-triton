@@ -207,6 +207,8 @@ void mlir::triton::intel::populateXe4ToLLVMPatterns(
   patterns.add<IndexLowering<mlir::gpu::BlockDimOp>>(typeConverter,
                                                      "localsize");
   patterns.add<IndexLowering<mlir::gpu::ThreadIdOp>>(typeConverter, "localid");
+  patterns.add<IndexLowering<mlir::gpu::GridDimOp>>(typeConverter,
+                                                    "groupcount");
   patterns.add<BarrierLowering>(typeConverter);
   patterns.add<ShuffleLowering>(typeConverter);
 }
