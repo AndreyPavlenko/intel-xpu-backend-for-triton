@@ -1793,7 +1793,7 @@ def test_load_scope_sem_coop_grid_cta_not_one(device):
         tl.store(ptrs, a)
 
     block_size = 128
-    data = torch.zeros((128, ), device=device, dtype=torch.float32)
+    data = torch.zeros((128, ), dtype=torch.float32).to(device)
 
     out = kernel_r[(2, )](data, BLOCK_SIZE=block_size, num_ctas=4, launch_cooperative_grid=True)
     out = kernel_r[(2, )](data, BLOCK_SIZE=block_size, num_ctas=4, launch_cooperative_grid=False)
@@ -1812,7 +1812,7 @@ def test_load_scope_sem_coop_grid_cta_one(device):
         tl.store(ptrs, a)
 
     block_size = 128
-    data = torch.zeros((128, ), device=device, dtype=torch.float32)
+    data = torch.zeros((128, ), dtype=torch.float32).to(device)
 
     # Should do nothing different for num_ctas=1 (with coop launch grid)
     out = kernel_r[(2, )](data, BLOCK_SIZE=block_size, num_ctas=1, launch_cooperative_grid=True)
@@ -3273,12 +3273,15 @@ def test_generic_reduction(device):
         tl.store(out_var, m2 / weight)
 
     SIZE = 512
-    x = torch.rand(SIZE, device=device)
+    x = torch.rand(SIZE).to(device)
     out_mean = torch.empty((), device=device)
     out_var = torch.empty((), device=device)
 
     var_mean_kernel[(1, )](x, out_mean, out_var, BLOCK=SIZE)
 
+    out_mean = out_mean.cpu()
+    out_var = out_var.cpu()
+    x = x.cpu()
     expect_var, expect_mean = torch.var_mean(x, dim=0, correction=0)
     torch.testing.assert_close(out_mean, expect_mean)
     torch.testing.assert_close(out_var, expect_var)
@@ -4975,12 +4978,13 @@ def test_trans_reshape(device):
         tl.store(out_base_ptr + tl.arange(0, IN_SHAPE0 * IN_SHAPE1), x)
 
     shape = (32, 32)
-    input = torch.arange(math.prod(shape), dtype=torch.int32, device=device).reshape(shape)
+    input = torch.arange(math.prod(shape), dtype=torch.int32).reshape(shape)
     expected = torch.permute(input, (1, 0))
     # Don't do zeros_like -- that copies the layout, which we don't want.
-    actual = torch.zeros(expected.shape, dtype=torch.int32, device=device)
+    actual = torch.zeros(expected.shape, dtype=torch.int32).to(device)
+    input_tri = input.to(device)
 
-    k = kernel[(1, )](input, actual, shape[0], shape[1])
+    k = kernel[(1, )](input_tri, actual, shape[0], shape[1])
     if not is_xpu():
         assert k.asm['ttgir'].count(
             'ttg.convert_layout') == 1, "Expected exactly one convert_layout op in the TTGIR after optimization"
@@ -5593,9 +5597,9 @@ def test_nested_while(device):
                 count = count - 2
 
     counter = torch.tensor([8], dtype=torch.int32, device=device)
-    data = torch.zeros((1, ), device=device, dtype=torch.float32)
+    data = torch.zeros((1, ), dtype=torch.float32).to(device)
     nested_while[(1, )](data, counter)
-    assert data[0] == 40
+    assert data.cpu()[0] == 40
 
 
 def test_constexpr_if_return(device):
@@ -5664,7 +5668,7 @@ def test_num_threads(device):
     num_threads = 256
     out = to_triton(np.zeros((num_threads, ), dtype=np.int32), device=device)
     kernel[(1, )](out, num_warps=num_threads // 32)
-    assert torch.sum(out) == 256
+    assert torch.sum(out.cpu()) == 256
 
 
 def test_globaltimer(device):
@@ -7185,15 +7189,16 @@ def test_zero_strided_tensors(device):
 
         tl.atomic_add(x_ptr, 1)
 
-    x = torch.zeros((2, 2, 1), device=device)
+    x = torch.zeros((2, 2, 1))
     c_dim = 3
-    x = x.expand((2, 2, c_dim))
+    x = x.expand((2, 2, c_dim)).to(device)
 
     a, b, c = x.shape
     grid = (a, b, c)
     with device == 'cuda' and torch.cuda.device(x.device.index) or torch.xpu.device(x.device.index):
         _simple_add[grid](x, x.stride(0), x.stride(1))
 
+    x = x.cpu()
     assert torch.allclose(x, torch.ones_like(x) * c_dim)
 
 
