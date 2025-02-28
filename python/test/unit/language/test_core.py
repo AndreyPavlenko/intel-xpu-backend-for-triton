@@ -2033,7 +2033,7 @@ def test_umulhi(dtype_str, device):
     x_tri = to_triton(x, device=device)
     y = numpy_random((N, ), dtype_str=dtype_str, rs=rs, low=0)
     y_tri = to_triton(y, device=device)
-    z_tri = torch.zeros_like(x_tri)
+    z_tri = torch.zeros((N, ), dtype=x_tri.dtype).to(device)
     kernel[(1, )](x_tri, y_tri, z_tri, N=N)
 
     z_ref = umulhi32(x, y)
@@ -2261,11 +2261,11 @@ def test_max_returns_zero(device):
         tl.store(Z, z)
 
     BLOCK = 128
-    x = torch.zeros((BLOCK, ), device=device)
-    z = torch.ones((1, ), device=device)
+    x = torch.zeros((BLOCK, )).to(device)
+    z = torch.ones((1, )).to(device)
 
     kernel[(1, )](x, z, BLOCK=BLOCK)
-    assert z[0] == 0
+    assert z.cpu()[0] == 0
 
 
 def get_reduced_dtype(dtype_str, op):
@@ -6352,7 +6352,7 @@ def test_load_scalar_with_mask(device):
     Input = torch.tensor([0], dtype=torch.int32, device=device)
     Out = torch.empty_like(Index, device=device)
     kernel[(1, )](Input, Index, Out, Index.numel())
-    assert Out.data[0] == 0
+    assert Out.cpu().data[0] == 0
 
 
 # This test is used to test our own PTX codegen for float16 and int16 conversions
@@ -6683,9 +6683,10 @@ def test_static_range(device):
     step = 7
     Out = torch.empty(1, dtype=torch.int32, device=device)
     loop_kernel[(1, )](Out, N, step)
-    Acc = torch.tensor([0], dtype=torch.int32, device=device)
+    Acc = torch.tensor([0], dtype=torch.int32)
     for i in range(0, N, step):
         Acc += i
+    Out = Out.cpu()
     assert (Out == Acc).all(), (Out, Acc)
 
 
@@ -6804,16 +6805,16 @@ def test_temp_var_in_loop(device):
     BLOCK = 32
     out = torch.empty((BLOCK, ), dtype=torch.int32, device=device)
     temp_in_loop[(1, )](out, N, BLOCK)
-    acc = torch.full((BLOCK, ), 0, dtype=torch.int32, device=device)
+    acc = torch.full((BLOCK, ), 0, dtype=torch.int32)
     for i in range(N):
         if i == 0:
-            temp = torch.full((BLOCK, ), 2, dtype=torch.int32, device=device)
+            temp = torch.full((BLOCK, ), 2, dtype=torch.int32)
             acc = temp
         else:
-            acc += torch.full((BLOCK, ), 1, dtype=torch.int32, device=device)
-        temp = torch.full((BLOCK, ), 1, dtype=torch.int32, device=device)
+            acc += torch.full((BLOCK, ), 1, dtype=torch.int32)
+        temp = torch.full((BLOCK, ), 1, dtype=torch.int32)
         acc += temp
-    assert (acc == out).all()
+    assert (acc == out.cpu()).all()
 
 
 @pytest.mark.interpreter
@@ -7158,13 +7159,13 @@ def test_jit_function_arg(device):
         tl.store(out_ptr + offsets, out_data)
 
     BLOCK_SIZE = 16
-    x = torch.full((BLOCK_SIZE, ), 3.0, device=device)
+    x = torch.full((BLOCK_SIZE, ), 3.0).to(device)
     out = torch.empty((BLOCK_SIZE, ), device=device)
-    expect = torch.full((BLOCK_SIZE, ), 9.0, dtype=x.dtype, device=device)
+    expect = torch.full((BLOCK_SIZE, ), 9.0, dtype=x.dtype)
 
     square_kernel_jit_function[(1, )](x, out, BLOCK_SIZE)
 
-    torch.testing.assert_close(out, expect)
+    torch.testing.assert_close(out.cpu(), expect)
 
 
 @pytest.mark.interpreter
