@@ -1132,11 +1132,12 @@ def test_math_erf_op(dtype, device):
         tl.store(Z + off, z)
 
     torch_dtype = torch.float32 if dtype == "float32" else torch.float64
-    x = torch.randn(SIZE, dtype=torch_dtype, device=device)
+    x = torch.randn(SIZE, dtype=torch_dtype)
     z_ref = torch.erf(x)
-    z_tri = torch.zeros_like(x)
-    kernel[(1, )](z_tri, x, SIZE=SIZE, num_warps=4)
-    torch.testing.assert_close(z_tri, z_ref)
+    x_tri = x.to(device)
+    z_tri = torch.zeros_like(x).to(device)
+    kernel[(1, )](z_tri, x_tri, SIZE=SIZE, num_warps=4)
+    torch.testing.assert_close(z_tri.cpu(), z_ref)
 
 
 @pytest.mark.interpreter
@@ -1193,11 +1194,11 @@ def test_precise_math(expr_prec, expr_ref, num_ctas, device):
         tl.store(OUT_REF + tl.arange(0, BLOCK), ref)
 
     shape = (128, )
-    out = torch.zeros(shape, dtype=torch.float32, device=device)
-    out_ref = torch.zeros(shape, dtype=torch.float32, device=device)
+    out = torch.zeros(shape, dtype=torch.float32).to(device)
+    out_ref = torch.zeros(shape, dtype=torch.float32).to(device)
 
-    x = torch.randn(shape, dtype=torch.float32, device=device)
-    y = torch.randn(shape, dtype=torch.float32, device=device)
+    x = torch.randn(shape, dtype=torch.float32)
+    y = torch.randn(shape, dtype=torch.float32)
 
     if (expr_prec.count('sqrt') > 0):
         x = torch.abs(x)
@@ -1205,6 +1206,8 @@ def test_precise_math(expr_prec, expr_ref, num_ctas, device):
     if (expr_prec.count('div') > 0):
         y += 1e-6
 
+    x = x.to(device)
+    y = y.to(device)
     kernel = patch_kernel(kernel, {'PREC_CALC': expr_prec, 'REF_CALC': expr_ref})
 
     kernel[(1, )](x, y, out, out_ref, BLOCK=shape[0], num_ctas=num_ctas)
@@ -4343,12 +4346,12 @@ def test_dot_without_load(dtype_str, device):
         tl.store(out_ptr, c)
 
     kernel = patch_kernel(_kernel, {'GENERATE_TEST_HERE': f"tl.full((32, 32), 1.0, tl.{dtype_str})"})
-    a = torch.ones((32, 32), dtype=getattr(torch, dtype_str), device=device)
-    b = torch.ones((32, 32), dtype=getattr(torch, dtype_str), device=device)
+    a = torch.ones((32, 32), dtype=getattr(torch, dtype_str))
+    b = torch.ones((32, 32), dtype=getattr(torch, dtype_str))
     out_ref = torch.matmul(a, b)
-    out = torch.zeros((32, 32), dtype=getattr(torch, dtype_str), device=device)
+    out = torch.zeros((32, 32), dtype=getattr(torch, dtype_str)).to(device)
     kernel[(1, )](out)
-    assert torch.all(out == out_ref)
+    assert torch.all(out.cpu() == out_ref)
 
 
 # ---------------
@@ -5404,13 +5407,12 @@ def test_if_return(mode, device):
         tl.store(Out, 1)
 
     out = to_triton(np.zeros((1, ), dtype=np.int32), device=device)
-    exit_early = to_triton(np.zeros((1, ), dtype=np.int32), device=device)
     # exit early path taken
-    exit_early[0] = 1
+    exit_early = to_triton(np.ones((1, ), dtype=np.int32), device=device)
     kernel[(1, )](exit_early, out, True, mode)
     assert to_numpy(out)[0] == 0
     # exit early path not taken
-    exit_early[0] = 0
+    exit_early = to_triton(np.zeros((1, ), dtype=np.int32), device=device)
     kernel[(1, )](exit_early, out, False, mode)
     assert to_numpy(out)[0] == 1
 
@@ -5618,15 +5620,15 @@ def test_constexpr_if_return(device):
 
         tl.store(Out, tl.program_id(0) + prev)
 
-    sem = torch.zeros((), device=device, dtype=torch.int32)
+    sem = torch.zeros((), dtype=torch.int32).to(device)
     out = torch.empty((), device=device, dtype=torch.int32)
     kernel[(1, )](sem, out, 1)
-    assert out.item() == 0
+    assert out.cpu().item() == 0
 
-    sem = torch.zeros((), device=device, dtype=torch.int32)
-    out = torch.full((), fill_value=-1, device=device, dtype=torch.int32)
+    sem = torch.zeros((), dtype=torch.int32).to(device)
+    out = torch.full((), fill_value=-1, dtype=torch.int32).to(device)
     kernel[(4, )](sem, out, 4)
-    assert out.item() >= 0
+    assert out.cpu().item() >= 0
 
 
 @triton.jit
@@ -6515,7 +6517,7 @@ def test_enable_fp_fusion(enable_fp_fusion, default_override, device):
         ptrs = data + tl.arange(0, 128)
         tl.store(ptrs, tl.load(ptrs) * 1.5 + 1.0)
 
-    data = torch.randn((128, ), device=device, dtype=torch.float32)
+    data = torch.randn((128, ), dtype=torch.float32).to(device)
     if default_override:
         os.environ["TRITON_DEFAULT_FP_FUSION"] = "1" if enable_fp_fusion else "0"
         h = mul_add[(1, )](data)
