@@ -656,6 +656,17 @@ void init_triton_ir(py::module &&m) {
                return py::none();
              return py::int_(ret.getInt());
            })
+      .def("get_str_attr",
+           [](ModuleOp &self, std::string name) -> py::object {
+             auto ret = self->getAttrOfType<StringAttr>(name);
+             if (!ret)
+               return py::none();
+             return py::str(ret.str());
+           })
+      .def("set_str_attr",
+           [](ModuleOp &self, std::string name, std::string val) -> void {
+             self->setAttr(name, StringAttr::get(self->getContext(), val));
+           })
       .def("create_location_snapshot",
            [](ModuleOp &self, const std::string &fileName) -> void {
              generateLocationsFromIR(/*raw_ostream=*/llvm::nulls(),

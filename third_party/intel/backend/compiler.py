@@ -328,6 +328,12 @@ class XPUBackend(BaseBackend):
 
     @staticmethod
     def make_llir(src, metadata, options, capability):
+        # Tests with TTGIR as input miss target attribute. We need to set it for proper
+        # compilation.
+        target_arch = src.get_str_attr("triton_intel_gpu.target_arch")
+        if not target_arch:
+            target_arch = "pisa" if capability >= Capability.XE4 else "spir64"
+            src.set_str_attr("triton_intel_gpu.target_arch", target_arch)
         # warp-specialization mutates num_warps
         num_warp_groups = src.get_int_attr("ttg.num-warp-groups-per-cta")
         if num_warp_groups is not None:
