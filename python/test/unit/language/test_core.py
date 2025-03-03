@@ -2105,13 +2105,14 @@ def test_join_with_mma(device):
         z = tl.dot(x3, x3)  # (32,32)
         tl.store(Z + 32 * tl.arange(0, 32)[:, None] + tl.arange(0, 32)[None, :], z)
 
-    x = torch.arange(0, 32 * 16, device=device, dtype=torch.float32).reshape((32, 16))
+    x = torch.arange(0, 32 * 16, dtype=torch.float32).reshape((32, 16))
     r = torch.stack([x, 2 * x], dim=-1).reshape((32, 32))
     z_ref = torch.matmul(r, r)
-    z = torch.zeros_like(z_ref)
-    kernel[(1, )](x, z)
+    z = torch.zeros_like(z_ref).to(device)
+    x_tri = x.to(device)
+    kernel[(1, )](x_tri, z)
 
-    torch.testing.assert_close(z, z_ref)
+    torch.testing.assert_close(z.cpu(), z_ref)
 
 
 @pytest.mark.interpreter
