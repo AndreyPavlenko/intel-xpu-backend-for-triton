@@ -13,6 +13,7 @@ add_triton_library(TritonIntelGPUToLLVM
     HistogramOpToLLVM.cpp
     LoadStoreOpToLLVM.cpp
     MakeRangeOpToLLVM.cpp
+    pISAAsmFormat.cpp
     PrintOpToLLVM.cpp
     ReduceOpToLLVM.cpp
     TritonGPUToLLVM.cpp
