@@ -1947,11 +1947,14 @@ def test_cat(dtype_str, num_warps, device):
         z = tl.cat(x, y, can_reorder=True)
         tl.store(Z + tl.arange(0, 2 * N), z)
 
-    x = torch.arange(0, 128, device=device).to(getattr(torch, dtype_str))
-    y = torch.arange(-128, 0, device=device).to(getattr(torch, dtype_str))
+    x = torch.arange(0, 128).to(getattr(torch, dtype_str))
+    y = torch.arange(-128, 0).to(getattr(torch, dtype_str))
     z_ref = torch.cat([x, y], dim=0).sum()
-    z = torch.zeros((256, ), dtype=getattr(torch, dtype_str), device=device)
+    z = torch.zeros((256, ), dtype=getattr(torch, dtype_str)).to(device)
+    x = x.to(device)
+    y = y.to(device)
     kernel[(1, )](x, y, z, N=128, num_warps=num_warps)
+    z = z.cpu()
     assert z.sum() == z_ref
     # check if there's no duplicate value in z
     assert z.unique().size(0) == z.size(0)
@@ -2741,14 +2744,15 @@ def test_histogram(M, N, device):
         tl.store(z_ptr + offset2, z)
 
     torch.manual_seed(17)
-    x = torch.randint(0, N, (M, ), device=device, dtype=torch.int32)
+    x = torch.randint(0, N, (M, ), dtype=torch.int32)
     z = torch.empty(N, dtype=torch.int32, device=device)
     # torch.histc does not work when the input type is not float and the device is CPU
     # https://github.com/pytorch/pytorch/issues/74236
     # This is a workload by converting the input to float
     z_torch = torch.histc(x.float(), bins=N, min=0, max=N - 1)
-    histogram_kernel[(1, )](x, z, M=M, N=N)
-    assert (z_torch == z).all()
+    x_tri = x.to(device)
+    histogram_kernel[(1, )](x_tri, z, M=M, N=N)
+    assert (z_torch == z.cpu()).all()
 
 
 @pytest.mark.parametrize("M, N", [(1, 64), (2, 32), (4, 16), (8, 8), (16, 4), (32, 2), (64, 1)])
@@ -4253,7 +4257,7 @@ def test_constexpr(literal, dtype_str, device):
         tl.store(out_ptr.to(tl.pointer_type(val.dtype)), val)
 
     kernel_patched = patch_kernel(kernel, {'GENERATE_TEST_HERE': f"{literal}"})
-    out = torch.zeros((1, ), dtype=torch.float32, device=device)
+    out = torch.zeros((1, ), dtype=torch.float32).to(device)
     h = kernel_patched[(1, )](out)
     assert re.search(r"arith.constant .* : " + dtype_str, h.asm["ttir"]) is not None
 
@@ -4572,7 +4576,7 @@ def test_vectorization(N, num_ctas, device):
 def test_vectorization_hints(has_hints, device):
     src = torch.empty(1024, device=device)
     dst = torch.empty(1024, device=device)
-    off = torch.zeros(1, device=device, dtype=torch.int32)
+    off = torch.zeros(1, dtype=torch.int32).to(device)
 
     @triton.jit
     def _kernel(dst, src, off, N, BLOCK_SIZE: tl.constexpr, HINT: tl.constexpr):
@@ -4725,8 +4729,8 @@ def _impl(value=10):
 @pytest.mark.interpreter
 def test_default(device):
     value = 5
-    ret0 = torch.zeros(1, dtype=torch.int32, device=device)
-    ret1 = torch.zeros(1, dtype=torch.int32, device=device)
+    ret0 = torch.zeros(1, dtype=torch.int32).to(device)
+    ret1 = torch.zeros(1, dtype=torch.int32).to(device)
 
     @triton.jit
     def _kernel(ret0, ret1, value=3):
@@ -4734,12 +4738,12 @@ def test_default(device):
         tl.store(ret1, _impl(value))
 
     _kernel[(1, )](ret0, ret1, value)
-    assert ret0.item() == 10
-    assert ret1.item() == value
+    assert ret0.cpu().item() == 10
+    assert ret1.cpu().item() == value
 
     _kernel[(1, )](ret0, ret1)
-    assert ret0.item() == 10
-    assert ret1.item() == 3
+    assert ret0.cpu().item() == 10
+    assert ret1.cpu().item() == 3
 
 
 # ---------------
@@ -5128,15 +5132,16 @@ def test_unary_math(func_str, device):
     kernel = patch_kernel(kernel, {'FUNC_STR': func_str})
 
     shape = (128, )
-    x = torch.randn(shape, dtype=torch.float32, device=device)
+    x = torch.randn(shape, dtype=torch.float32)
     if func_str in ['sqrt', 'rsqrt']:
         x = torch.abs(x)
     if func_str in ['log', 'log2']:
-        x = torch.max(x, torch.tensor(1e-6, dtype=torch.float32, device=device))
-    y = torch.zeros(shape, dtype=torch.float32, device=device)
+        x = torch.max(x, torch.tensor(1e-6, dtype=torch.float32))
+    y = torch.zeros(shape, dtype=torch.float32).to(device)
 
-    kernel[(1, )](x, y, BLOCK=shape[0])
-    torch.allclose(getattr(torch, func_str)(x), y, rtol=1e-3)
+    x_tri = x.to(device)
+    kernel[(1, )](x_tri, y, BLOCK=shape[0])
+    torch.allclose(getattr(torch, func_str)(x), y.cpu(), rtol=1e-3)
 
 
 # -----------------------
@@ -5379,15 +5384,14 @@ def test_if_else(device):
     out = to_triton(np.zeros((1, ), dtype=np.int32), device=device)
     true_val = to_triton(np.full((1, ), 1, dtype=np.int32), device=device)
     false_val = to_triton(np.full((1, ), 2, dtype=np.int32), device=device)
-    cond = to_triton(np.zeros((1, ), dtype=np.int32), device=device)
+    cond = to_triton(np.ones((1, ), dtype=np.int32), device=device)
     # True
-    cond[0] = True
     kernel[(1, )](cond, true_val, false_val, out)
-    assert to_numpy(out)[0] == true_val[0]
+    assert to_numpy(out)[0] == true_val.cpu()[0]
     # False
-    cond[0] = False
+    cond = to_triton(np.zeros((1, ), dtype=np.int32), device=device)
     kernel[(1, )](cond, true_val, false_val, out)
-    assert to_numpy(out)[0] == false_val[0]
+    assert to_numpy(out)[0] == false_val.cpu()[0]
 
 
 @pytest.mark.interpreter
@@ -5546,6 +5550,10 @@ def test_nested_if_else_return(_cond1, _cond2, _cond3, device):
     val2 = to_triton(np.full((1, ), 2, dtype=np.int32), device=device)
     val3 = to_triton(np.full((1, ), 3, dtype=np.int32), device=device)
     kernel[(1, )](cond1, cond2, cond3, val1, val2, val3, out)
+    val1 = val1.cpu()
+    val2 = val2.cpu()
+    val3 = val3.cpu()
+    out = out.cpu()
     targets = {
         (True, True, True): val1[0],
         (True, True, False): val1[0],
@@ -5582,6 +5590,11 @@ def test_while(device):
     bound = to_triton(np.full((1, ), 10, dtype=np.int32), device=device)
     cut_off = to_triton(np.full((1, ), 5, dtype=np.int32), device=device)
     kernel[(1, )](init_i, bound, cut_off, out_i, out_init_i, out_j)
+    init_i = init_i.cpu()
+    out_init_i = out_init_i.cpu()
+    out_i = out_i.cpu()
+    out_j = out_j.cpu()
+    bound = bound.cpu()
     assert out_init_i[0] == init_i[0]
     assert out_i[0] == init_i[0] + 1
     assert out_j[0] == bound[0]
@@ -6586,17 +6599,20 @@ def test_propagate_nan(dtype, propagate_nan, func, device):
         if func == 'clamp' and mode == 'B':
             # clamp does not guarantee propagation from 'min' and 'max' args
             continue
-        A = torch.randn((1, ), device=device, dtype=getattr(torch, dtype))
+        A = torch.randn((1, ), dtype=getattr(torch, dtype))
         if mode == 'A' or mode == 'both': A[0] = torch.nan
-        B = torch.randn((1, ), device=device, dtype=getattr(torch, dtype))
+        B = torch.randn((1, ), dtype=getattr(torch, dtype))
         if mode == 'B' or mode == 'both': B[0] = torch.nan
-        C = torch.zeros_like(A, device=device, dtype=getattr(torch, dtype))
+        C = torch.zeros_like(A, dtype=getattr(torch, dtype))
+        A = A.to(device)
+        B = B.to(device)
+        C = C.to(device)
         kernel[(1, )](A, B, C, propagate_nan, func)
 
         if mode == 'both' or propagate_nan == 'ALL':
-            assert torch.isnan(C[0])
+            assert torch.isnan(C.cpu()[0])
         else:
-            assert not torch.isnan(C[0])
+            assert not torch.isnan(C.cpu()[0])
 
 
 # -----------------------
