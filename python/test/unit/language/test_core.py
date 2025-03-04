@@ -4320,8 +4320,8 @@ def test_const(device, choose_const, constexpr, mode):
 """
 
     SIZE = 128
-    input = torch.randn((SIZE, ), dtype=torch.float32, device=device)
-    output = torch.zeros((SIZE, ), dtype=torch.float32, device=device)
+    input = torch.randn((SIZE, ), dtype=torch.float32).to(device)
+    output = torch.zeros((SIZE, ), dtype=torch.float32).to(device)
     patched_kernel = patch_kernel(kernel_constexpr if constexpr else kernel, {'LOSE_TAIL': LOSE_TAIL, 'CONSTEXPR': ''})
 
     expect_fail = (not constexpr and mode != "direct") or choose_const
@@ -4344,7 +4344,7 @@ def test_const(device, choose_const, constexpr, mode):
         assert error in error_msg, "Wrong error message!"
     else:
         patched_kernel[(1, )](input, output, output, choose_const, SIZE, SIZE)
-        assert torch.all(input == output)
+        assert torch.all(input.cpu() == output.cpu())
 
 
 @pytest.mark.interpreter
@@ -5377,7 +5377,7 @@ def test_for_iv(lo, hi, iv, device):
 
     out = to_triton(np.zeros((1, ), dtype=np.int64), device=device)
     kernel[(1, )](out, lo, hi, iv)
-    assert out[0] == sum(range(lo, hi, iv))
+    assert out[0].cpu() == sum(range(lo, hi, iv))
 
 
 @pytest.mark.interpreter
@@ -5964,7 +5964,7 @@ def test_local_load_store(M, N, K, dist_layout, shared_layout, device, tmp_path:
     if is_xpu() and isinstance(dist_layout, DotOperandLayout) and isinstance(dist_layout.parent, MmaLayout):
         pytest.xfail("DotOperandLayout with MmaLayout is not supported in XPU")
 
-    x = torch.arange(0, M * N * K, device=device, dtype=torch.int32).reshape(M, N, K)
+    x = torch.arange(0, M * N * K, dtype=torch.int32).reshape(M, N, K).to(device)
     z = torch.empty_like(x, device=device)
 
     temp_file = tmp_path / "test_local_load_store.ttgir"
@@ -5972,7 +5972,7 @@ def test_local_load_store(M, N, K, dist_layout, shared_layout, device, tmp_path:
     kernel = triton.compile(str(temp_file))
 
     kernel[(1, 1, 1)](x, z)
-    assert torch.equal(z, x)
+    assert torch.equal(z.cpu(), x.cpu())
 
 
 dot_layouts = [
@@ -6056,7 +6056,7 @@ def test_local_load_store_dot(M, N, dtype, dist_layout, shared_layout, device, t
     kernel = triton.compile(str(temp_file))
 
     kernel[(1, 1, 1)](x, z)
-    assert torch.equal(z, x)
+    assert torch.equal(z.cpu(), x.cpu())
 
 
 mma_layouts = [
@@ -7095,11 +7095,11 @@ def test_gather(src_shape, indices_shape, axis, device):
 
         return output
 
-    src = torch.randn(src_shape, device=device)
-    indices = torch.randint(0, src.shape[axis], indices_shape, device=device)
+    src = torch.randn(src_shape)
+    indices = torch.randint(0, src.shape[axis], indices_shape)
     ref = torch.gather(src, axis, indices)
-    result = triton_gather(src, axis, indices)
-    torch.testing.assert_close(result, ref, rtol=0, atol=0)
+    result = triton_gather(src.to(device), axis, indices.to(device))
+    torch.testing.assert_close(result.cpu(), ref, rtol=0, atol=0)
 
 
 # These layouts are specially chosen to trigger the warp shuffle codegen.
@@ -7157,9 +7157,11 @@ def test_gather_warp_shuffle(src_shape, indices_shape, axis, src_layout, indices
     \1 = ttg.convert_layout %out : tensor<""" + output_spec + r""", #idx_layout> -> tensor<""" + output_spec + r""", \6>"""
         return re.sub(pat, repl, ir)
 
-    src = torch.randn(src_shape, device=device)
-    indices = torch.randint(0, src.shape[axis], indices_shape, device=device)
+    src = torch.randn(src_shape)
+    indices = torch.randint(0, src.shape[axis], indices_shape)
     ref = torch.gather(src, axis, indices)
+    src = src.to(device)
+    indices = indices.to(device)
 
     output, compiled = prepare_kernel(src, axis, indices)
     ir = compiled.asm["ttgir"]
@@ -7175,7 +7177,7 @@ def test_gather_warp_shuffle(src_shape, indices_shape, axis, src_layout, indices
 
     kernel[(1, 1, 1)](src, indices, output)
 
-    torch.testing.assert_close(output, ref, rtol=0, atol=0)
+    torch.testing.assert_close(output.cpu(), ref, rtol=0, atol=0)
 
 
 @triton.jit
