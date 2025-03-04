@@ -1,6 +1,8 @@
 #include "PatternTritonGPUOpToLLVM.h"
 #include "Utility.h"
 
+#include "Dialect/TritonIntelGPU/IR/Utils.h"
+
 namespace {
 
 using namespace mlir;
@@ -117,6 +119,8 @@ private:
         rewriter.getDenseI32ArrayAttr({}));
     newCallOp.getProperties().setOperandSegmentSizes(
         {static_cast<int>(promotedOperands.size()), 0});
+    if (triton::gpu::intel::hasPisaTargetArch(callOp))
+      newCallOp.setCConv(LLVM::cconv::CConv::PISA_FUNC);
     return newCallOp;
   }
 

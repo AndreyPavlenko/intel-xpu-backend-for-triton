@@ -112,11 +112,13 @@ struct FuncOpConversion : public ConvertOpToLLVMPattern<triton::FuncOp> {
     MLIRContext *ctx = funcOp->getContext();
     auto mod = funcOp->getParentOfType<ModuleOp>();
     int threadsPerWarp = triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
+    bool isPisa = gpu::intel::hasPisaTargetArch(funcOp);
     if (LLVM::isKernel(funcOp)) {
-      bool isPisa = gpu::intel::hasPisaTargetArch(funcOp);
       newFuncOp.setCConv(isPisa ? LLVM::CConv::PISA_KERNEL
                                 : LLVM::CConv::SPIR_KERNEL);
       newFuncOp.setLinkage(LLVM::Linkage::External);
+    } else if (isPisa) {
+      newFuncOp.setCConv(LLVM::CConv::PISA_FUNC);
     }
 
     newFuncOp->setAttr(
