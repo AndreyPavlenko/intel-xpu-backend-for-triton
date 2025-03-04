@@ -1985,15 +1985,15 @@ def test_store_constant(num_ctas, dtype_str, constant_field, device):
         tl.store(output_ptr + offsets, output, mask=mask)
 
     block_size = 128
-    ref = torch.ones([block_size], dtype=getattr(torch, dtype_str), device=device)
-    output = torch.zeros([block_size], dtype=getattr(torch, dtype_str), device=device)
+    ref = torch.ones([block_size], dtype=getattr(torch, dtype_str))
+    output = torch.zeros([block_size], dtype=getattr(torch, dtype_str)).to(device)
 
     kernel[(1, )](output, block_size, BLOCK_SIZE=block_size, num_ctas=num_ctas, CONSTANT_FIELD=constant_field)
 
     if constant_field == "value":
-        assert torch.all(output == ref)
+        assert torch.all(output.cpu() == ref)
     else:
-        assert torch.all(output == 0)
+        assert torch.all(output.cpu() == 0)
 
 
 def test_load_store_same_ptr(device):
@@ -2822,8 +2822,8 @@ def test_optimize_thread_locality(op, BLOCK_N, N, num_pid_n, device):
     kernel = patch_kernel(kernel, {'ACCUMULATE_PATCH': reduce_patch, 'INITIALIZE_PATCH': initialize_patch})
     torch.manual_seed(0)
     BLOCK_M = 32
-    x = torch.randn((BLOCK_M, N), dtype=torch.float32, device=device)
-    y = torch.randn((BLOCK_M, num_pid_n), dtype=torch.float32, device=device)
+    x = torch.randn((BLOCK_M, N), dtype=torch.float32).to(device)
+    y = torch.randn((BLOCK_M, num_pid_n), dtype=torch.float32).to(device)
     h = kernel[(1, num_pid_n, 1)](x, y, N, BLOCK_M, BLOCK_N)
     if not is_interpreter():
         assert h.asm['ttgir'].count(
@@ -5880,7 +5880,7 @@ def test_convert2d(M, N, src_layout, interm_layout, dst_layout, dtype, device, t
 
     kernel[(1, 1, 1)](x.data_ptr(), z.data_ptr())
 
-    torch.testing.assert_close(z, x, rtol=0, atol=0)
+    torch.testing.assert_close(z.cpu(), x.cpu(), rtol=0, atol=0)
 
 
 layouts_3d = [
