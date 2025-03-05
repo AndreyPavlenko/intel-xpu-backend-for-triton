@@ -51,9 +51,14 @@ struct IndexLowering : public ConvertOpToLLVMPattern<Op> {
     // clang-format on
     Type resTy =
         this->getTypeConverter()->convertType(op.getResult().getType());
+    auto funcAttrs = noUnwindWillReturnAttrs;
+    funcAttrs.memEffectsAttr = rewriter.getAttr<LLVM::MemoryEffectsAttr>(
+        /*other=*/LLVM::ModRefInfo::NoModRef,
+        /*argMem=*/LLVM::ModRefInfo::NoModRef,
+        /*inaccessibleMem=*/LLVM::ModRefInfo::NoModRef);
     LLVM::CallOp call =
-        createDeviceFunctionCall(rewriter, funcName, resTy, {}, {}, {}, {}, {},
-                                 LLVM::cconv::CConv::PISA_FUNC);
+        createDeviceFunctionCall(rewriter, funcName, resTy, {}, {}, {},
+                                 funcAttrs, {}, LLVM::cconv::CConv::PISA_FUNC);
     rewriter.replaceOp(op, call);
     return success();
   }
