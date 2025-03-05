@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.18)
+project(KernelLauncher CXX)
+set(CMAKE_CXX_COMPILER icpx)
+add_executable(KernelLauncher KernelLauncher.cpp)
+target_compile_options(KernelLauncher PRIVATE -fsycl -g -O0)
+target_link_options(KernelLauncher PRIVATE -fsycl -lze_loader)
+target_include_directories(KernelLauncher PRIVATE "$ENV{ONEAPI_ROOT}/compiler/latest/include")

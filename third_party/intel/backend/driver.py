@@ -291,9 +291,6 @@ def compile_module_from_src(src, name):
 
 
 class XPUUtils(object):
-    # This map holds loaded kernels in case we want to create
-    # a reproducer
-    LOADED_KERNELS = {}
 
     def __new__(cls):
         if not hasattr(cls, "instance"):
@@ -311,15 +308,6 @@ class XPUUtils(object):
         self.device_count = self.mod.init_devices(self.get_sycl_queue())
         self.current_device = 0 if self.device_count[0] > 0 else -1
         self.wait_on_sycl_queue = self.mod.wait_on_sycl_queue
-
-        # Keep loaded binaries to make reproducers.
-        if os.getenv('TRITON_XPU_DUMP_SPIRV_KERNEL_ARGS', None):
-            def load_binary_and_keep(*args):
-                res = mod.load_binary(*args)
-                self.LOADED_KERNELS[res[1]] = args[1]
-                return res
-
-            self.load_binary = load_binary_and_keep
 
     def get_current_device(self):
         return self.current_device
@@ -649,75 +637,6 @@ extern "C" EXPORT_FUNC PyObject* launch(PyObject* args) {{
     return src
 
 
-def serialize_kernel_metadata(arg, args_dict):
-    args_dict['num_warps'] = arg.num_warps
-    args_dict['threads_per_warp'] = arg.threads_per_warp
-    args_dict['shared_memory'] = arg.shared
-    args_dict['kernel_name'] = arg.name
-    is_spv = not os.getenv("TRITON_XPU_GEN_NATIVE_CODE", False)
-    args_dict['is_spv'] = is_spv
-    args_dict['spv_name'] = f"{arg.name}.{'spv' if is_spv else 'xebin'}"
-    args_dict['build_flags'] = arg.build_flags
-
-
-def serialize_args(args, constants, signature):
-    import torch
-    import numbers
-    dir_path = os.getenv('TRITON_XPU_DUMP_SPIRV_KERNEL_ARGS')
-    if not os.path.exists(dir_path):
-        os.makedirs(dir_path)
-        print(f"Path to directory consisting of SPIR-V Runner data: {dir_path}")
-
-    cnt = 0
-    args_dict = {"gridX": args[cnt], "gridY": args[cnt + 1], "gridZ": args[cnt + 2]}
-    # 3: stream
-    # 4: function
-    # 5: packed kernel metadata
-    assert type(args[cnt + 5]).__name__ == "KernelMetadata"
-    serialize_kernel_metadata(args[cnt + 5], args_dict)
-    # 6: launch_metadata
-    # 7: launch_enter_hook
-    # 8: launch_exit_hook
-    args_dict['argument_list'] = []
-    counts = {"tensors": 0, "scalars": 0, "karg_cnt": 0}
-    cnt += 9
-    for arg in args[cnt:]:
-        sig_name = list(signature.keys())[counts['karg_cnt']]
-        if isinstance(arg, torch.Tensor):
-            cpu_tensor = arg.cpu()
-            tensor_path = os.path.join(dir_path, f"tensor_{counts['tensors']}.pt")
-            with open(tensor_path, 'wb') as f:
-                torch.save(cpu_tensor, f)
-            new_arg = {
-                "name": f"tensor_{counts['tensors']}", "type": "tensor", "dtype": str(arg.dtype), "ctype":
-                signature[sig_name]
-            }
-            args_dict['argument_list'].append(new_arg)
-            counts['tensors'] += 1
-        if isinstance(arg, numbers.Number):
-            if (counts['karg_cnt'], ) not in constants.keys():
-                new_arg = {
-                    "name": f"scalarArg_{counts['scalars']}", "type": "scalar", "value": arg, "ctype":
-                    signature[sig_name]
-                }
-                args_dict['argument_list'].append(new_arg)
-            counts['scalars'] += 1
-        counts['karg_cnt'] += 1
-
-    # Dump kernel file
-    kernel_path = os.path.join(dir_path, args_dict['spv_name'])
-    utils = XPUUtils()
-    assert args[4] in utils.LOADED_KERNELS
-    with open(kernel_path, 'wb') as kernel_file:
-        kernel_file.write(utils.LOADED_KERNELS[args[4]])
-
-    # Dump argument info as a JSON file
-    json_path = os.path.join(dir_path, 'args_data.json')
-    with open(json_path, 'w') as json_file:
-        import json
-        json.dump(args_dict, json_file, indent=4)
-
-
 class XPULauncher(object):
 
     def __init__(self, src, metadata):
@@ -729,11 +648,29 @@ class XPULauncher(object):
         self.mod = compile_module_from_src(src, "__triton_launcher")
 
     def __call__(self, *args, **kwargs):
-        # Serialize KernelArguments for SPIR-V Runner
-        serialize_kernel_args = os.getenv('TRITON_XPU_DUMP_SPIRV_KERNEL_ARGS', None)
-        if serialize_kernel_args:
-            serialize_args(args, self.constants, self.signature)
+        dir_path = os.getenv("TRITON_XPU_CREATE_REPRODUCER", None)
+        if dir_path:
+            from triton.backends.intel.reproducer.reproducer import create_reproducer
+            dir_path = os.path.join(dir_path, args[5].name)
+            create_reproducer(dir_path, args, self.constants, self.signature)
+
         self.mod.launch(args)
+
+        if dir_path:
+            import torch
+
+            for i, arg in enumerate(args[9:]):
+                # If the output tensors have a compare_with attribute, make the comparison.
+                if isinstance(arg, torch.Tensor) and hasattr(arg, "compare_with"):
+                    if ("f" in str(arg.dtype) and (hasattr(arg, "compare_with_rtol")
+                                                   or hasattr(arg, "compare_with_atol")
+                                                   or hasattr(arg, "compare_with_equal_nan"))):
+                        rtol = getattr(arg, "compare_with_rtol", 1e-05)
+                        atol = getattr(arg, "compare_with_atol", 1e-08)
+                        equal_nan = getattr(arg, "compare_with_equal_nan", False)
+                        assert torch.allclose(arg.to("cpu"), arg.compare_with.to("cpu"), rtol, atol, equal_nan)
+                    else:
+                        assert torch.equal(arg.to("cpu"), arg.compare_with.to("cpu"))
 
 
 class XPUDriver(DriverBase):
