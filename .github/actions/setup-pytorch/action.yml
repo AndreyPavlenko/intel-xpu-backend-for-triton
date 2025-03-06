@@ -22,6 +22,9 @@ inputs:
   cache:
     description: Cache enabled or disabled
     default: enabled
+  jgs_env:
+    description: JGS environment
+    default: false
 runs:
   using: "composite"
   steps:
@@ -110,6 +113,9 @@ runs:
       shell: bash
       run: |
         source ${{ inputs.oneapi }}/setvars.sh
+        if [ ${{ inputs.jgs_env }} == 'true' ]; then
+          source /jgssim/jgssim-env.sh
+        fi
         cd pytorch
         pip install wheel
         pip install -r requirements.txt

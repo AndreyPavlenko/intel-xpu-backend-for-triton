@@ -90,7 +90,7 @@ fi
 if [ ! -d "$TRITON_PROJ" ]; then
   echo "****** Cloning $TRITON_PROJ ******"
   cd $BASE
-  git clone https://github.com/intel-innersource/applications.python.intel-xpu-backend-for-triton $TRITON_PROJ_NAME -b main-js
+  git clone https://github.com/intel-tools/intel-xpu-backend-for-triton $TRITON_PROJ_NAME -b main-js
 fi
 
 ############################################################################
