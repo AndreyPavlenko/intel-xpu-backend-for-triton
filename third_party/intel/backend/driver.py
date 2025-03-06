@@ -662,9 +662,9 @@ class XPULauncher(object):
             for i, arg in enumerate(args[9:]):
                 # If the output tensors have a compare_with attribute, make the comparison.
                 if isinstance(arg, torch.Tensor) and hasattr(arg, "compare_with"):
-                    if ("f" in str(arg.dtype) and (hasattr(arg, "compare_with_rtol")
-                                                   or hasattr(arg, "compare_with_atol")
-                                                   or hasattr(arg, "compare_with_equal_nan"))):
+                    if ("f" in str(arg.dtype)
+                            and (hasattr(arg, "compare_with_rtol") or hasattr(arg, "compare_with_atol")
+                                 or hasattr(arg, "compare_with_equal_nan"))):
                         rtol = getattr(arg, "compare_with_rtol", 1e-05)
                         atol = getattr(arg, "compare_with_atol", 1e-08)
                         equal_nan = getattr(arg, "compare_with_equal_nan", False)

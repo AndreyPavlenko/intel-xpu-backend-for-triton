@@ -16,6 +16,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+
 class Capability(IntEnum):
     XE2 = 2
     XE3p = 3
@@ -154,7 +155,7 @@ class XPUBackend(BaseBackend):
             self.binary_ext = "xebin"
         else:
             self.binary_ext = "spv"
-        
+
         self.properties = self.parse_target(target.arch)
 
     def parse_target(self, tgt_prop) -> dict:
@@ -280,8 +281,7 @@ class XPUBackend(BaseBackend):
                                                         properties["has_subgroup_2d_block_io"],
                                                         properties["has_subgroup_matrix_multiply_accumulate"],
                                                         properties["has_bfloat16_conversions"],
-                                                        properties["has_fp8_dpas"], opt.threads_per_warp,
-                                                        target_arch)
+                                                        properties["has_fp8_dpas"], opt.threads_per_warp, target_arch)
 
         pm.run(mod)
 
@@ -494,7 +494,8 @@ class XPUBackend(BaseBackend):
 
     def add_stages(self, stages, options):
         stages["ttir"] = lambda src, metadata: self.make_ttir(src, metadata, options)
-        stages["ttgir"] = lambda src, metadata: self.make_ttgir(src, metadata, options, self.properties, self.capability)
+        stages["ttgir"] = lambda src, metadata: self.make_ttgir(src, metadata, options, self.properties, self.capability
+                                                                )
         stages["llir"] = lambda src, metadata: self.make_llir(src, metadata, options, self.capability)
         if self.capability >= Capability.XE4:
             stages["pisa"] = lambda src, metadata: self.make_pisa(src, metadata)

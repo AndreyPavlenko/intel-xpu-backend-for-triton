@@ -380,8 +380,7 @@ void validate_results(std::vector<TensorBuffer> &output_tensors,
     }
 
     if (!torch::allclose(expected_tensor, actual_tensor)) {
-      std::cout << "FAILED! Mismatch with " << expected_outputs
-                << std::endl;
+      std::cout << "FAILED! Mismatch with " << expected_outputs << std::endl;
       std::cout << "Actual result:\n" << actual_tensor << std::endl;
       std::cout << "Expected result:\n" << expected_tensor << std::endl;
       throw std::runtime_error("Tensors are not close enough");

@@ -18,9 +18,9 @@ def save_raw_tensor(tensor, file_path):
 def make_tensor_loop(tensor, name, shape, idx, lines, sfx):
     if idx == len(shape):
         lines.append(
-            f"{sfx}size_t idx = i0 * {name}Strides[0]{''.join(f' + i{i} * {name}Strides[{i}]' for i in range(1, idx))};")
-        if (hasattr(tensor, "compare_with_rtol")
-                or hasattr(tensor, "compare_with_atol")
+            f"{sfx}size_t idx = i0 * {name}Strides[0]{''.join(f' + i{i} * {name}Strides[{i}]' for i in range(1, idx))};"
+        )
+        if (hasattr(tensor, "compare_with_rtol") or hasattr(tensor, "compare_with_atol")
                 or hasattr(tensor, "compare_with_equal_nan")):
             rtol = getattr(tensor, "compare_with_rtol", 1e-05)
             atol = getattr(tensor, "compare_with_atol", 1e-08)
@@ -49,9 +49,11 @@ def create_reproducer(dir_path, args, constants, signature):
     # 3: stream, 4: function, 5: packed kernel metadata, 6: launch_metadata, 7: launch_enter_hook, 8: launch_exit_hook
     assert type(args[5]).__name__ == "KernelMetadata"
     meta = args[5]
-    args_dict = {"gridX": args[0], "gridY": args[1], "gridZ": args[2], "num_warps": meta.num_warps,
-                 "threads_per_warp": meta.threads_per_warp, "shared_memory": meta.shared, "kernel_name": meta.name,
-                 "build_flags": meta.build_flags, "arguments": []}
+    args_dict = {
+        "gridX": args[0], "gridY": args[1], "gridZ": args[2], "num_warps": meta.num_warps, "threads_per_warp":
+        meta.threads_per_warp, "shared_memory": meta.shared, "kernel_name": meta.name, "build_flags": meta.build_flags,
+        "arguments": []
+    }
     scalars_cnt = 0
     tensors = {}
     tensors_ref = []
@@ -76,15 +78,13 @@ def create_reproducer(dir_path, args, constants, signature):
                 tensors_ref_cmp.append("  }")
                 save_raw_tensor(arg.compare_with, os.path.join(data_dir_path, f"{name}_ref.bin"))
             new_arg = {
-                "name": name, "type": "tensor", "dtype": str(arg.dtype), "ctype":
-                    sig_type, "shape": list(arg.shape), "strides": list(arg.stride())
+                "name": name, "type": "tensor", "dtype": str(arg.dtype), "ctype": sig_type, "shape": list(arg.shape),
+                "strides": list(arg.stride())
             }
             args_dict["arguments"].append(new_arg)
-        if isinstance(arg, numbers.Number) and not (karg_cnt,) in constants.keys():
+        if isinstance(arg, numbers.Number) and (karg_cnt, ) not in constants.keys():
             set_args.append(f"{karg_cnt}, static_cast<tt_{sig_type}>({arg})")
-            new_arg = {
-                "name": f"scalar{scalars_cnt}", "type": "scalar", "value": arg, "ctype": sig_type
-            }
+            new_arg = {"name": f"scalar{scalars_cnt}", "type": "scalar", "value": arg, "ctype": sig_type}
             args_dict["arguments"].append(new_arg)
             scalars_cnt += 1
 
@@ -135,4 +135,4 @@ int main(const int argc, const char **argv) {{
 {join_lines(tensors_ref_cmp)}
   return 0;
 }}
-""");
+""")

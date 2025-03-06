@@ -3,4 +3,3 @@ add_triton_ut(
 	SRCS pISAAsmFormatTest.cpp
 	LIBS TritonGPUToLLVM TritonIntelGPUToLLVM
 )
-

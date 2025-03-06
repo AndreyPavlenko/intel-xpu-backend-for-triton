@@ -73,4 +73,3 @@ module attributes {triton_intel_gpu.min_sg_size = 16 : i32, triton_intel_gpu.sup
     tt.return
   }
 }
-
