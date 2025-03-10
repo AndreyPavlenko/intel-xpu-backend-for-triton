@@ -158,7 +158,7 @@ jobs:
 
           {
             echo SKIPLIST="$skiplist"
-            echo TRITON_TEST_CMD="${{ inputs.jgs_env && 'source /jgssim/jgssim-env.sh && ' }} bash -v -x scripts/test-triton.sh --warning-reports --skip-pytorch-install --reports-dir $GITHUB_WORKSPACE/reports ${{ inputs.ignore_errors && '--ignore-errors' || '' }} $skiplist"
+            echo TRITON_TEST_CMD="${{ inputs.jgs_env && 'source /jgssim/jgssim-env.sh && ' }}bash -v -x scripts/test-triton.sh --warning-reports --skip-pytorch-install --reports-dir $GITHUB_WORKSPACE/reports ${{ inputs.ignore_errors && '--ignore-errors' || '' }} $skiplist"
           } | tee -a $GITHUB_ENV
 
       - name: Run unit tests
@@ -251,7 +251,7 @@ jobs:
             .env
 
       - name: Upload test reports
-        if: inputs.upload_test_reports
+        if: always() && inputs.upload_test_reports
         uses: actions/upload-artifact@v4
         with:
           name: test-reports-${{ inputs.python_version }}-${{ inputs.runner_label || inputs.driver_version }}

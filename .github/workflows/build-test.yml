@@ -120,13 +120,6 @@ jobs:
       - name: Matrix
         id: matrix
         run: |
-          if [[ -n "${{ inputs.runner_label }}" ]]; then
-            matrix='{"python": ["3.9"]}'
-          else
-            matrix='{"python": ["3.9"], "driver": ["rolling", "lts"]}'
-          fi
-          echo "matrix=$matrix" | tee -a $GITHUB_OUTPUT
-
           echo github.event_name  = ${{ github.event_name }}
           echo inputs.jgs_env = ${{ inputs.jgs_env }}
           echo github.base_ref = ${{ github.base_ref }}
@@ -142,6 +135,13 @@ jobs:
           fi
           echo "TESTING_ON_JGS=$TESTING_ON_JGS" | tee -a $GITHUB_OUTPUT
 
+          if [[ -n "${{ inputs.runner_label }}" || "${TESTING_ON_JGS}" == "true" ]]; then
+            matrix='{"python": ["3.9"]}'
+          else
+            matrix='{"python": ["3.9"], "driver": ["rolling", "lts"]}'
+          fi
+          echo "matrix=$matrix" | tee -a $GITHUB_OUTPUT
+
   integration-tests:
     name: Integration tests matrix
     needs: prepare
@@ -156,8 +156,8 @@ jobs:
       pytorch_ref: ${{ inputs.pytorch_ref }}
       pytorch_mode: ${{ inputs.pytorch_mode || 'source' }}
       python_version: ${{ matrix.python }}
-      upload_test_reports: ${{ inputs.upload_test_reports || false }}
-      ignore_errors: ${{ inputs.ignore_errors || false }}
+      upload_test_reports: ${{ inputs.upload_test_reports || needs.prepare.outputs.TESTING_ON_JGS == 'true' }}
+      ignore_errors: ${{ inputs.ignore_errors || needs.prepare.outputs.TESTING_ON_JGS == 'true' }}
       skip_list: ${{ inputs.skip_list }}
       run_name: ${{ inputs.run_name }}
       enable_unskip: ${{ inputs.enable_unskip || false }}
