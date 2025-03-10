@@ -127,15 +127,15 @@ jobs:
           fi
           echo "matrix=$matrix" | tee -a $GITHUB_OUTPUT
 
-          echo '${{ github.event_name }}' = ${{ github.event_name }}
-          echo '${{ inputs.jgs_env }}' = ${{ inputs.jgs_env }}
-          echo '${{ github.base_ref }}' = ${{ github.base_ref }}
-          echo '${{ github.ref }}' = ${{ github.ref }}
-          if [[ ${{ github.event_name }} == 'workflow_dispatch' && ${{ inputs.jgs_env }} == "true" ]]; then
+          echo github.event_name  = ${{ github.event_name }}
+          echo inputs.jgs_env = ${{ inputs.jgs_env }}
+          echo github.base_ref = ${{ github.base_ref }}
+          echo github.ref = ${{ github.ref }}
+          if [[ "${{ github.event_name }}" == 'workflow_dispatch' && "${{ inputs.jgs_env }}" == "true" ]]; then
             TESTING_ON_JGS="true"
-          elif [[ ${{ github.event_name }} == 'pull_request' && ${{ github.base_ref }} == 'refs/heads/main-js' ]]; then
+          elif [[ "${{ github.event_name }}" == 'pull_request' && "${{ github.base_ref }}" == 'refs/heads/main-js' ]]; then
             TESTING_ON_JGS="true"
-          elif [[ ${{ github.event_name }} == 'push' && ${{ github.ref }} == 'refs/heads/main-js') ]]; then
+          elif [[ "${{ github.event_name }}" == 'push' && "${{ github.ref }}" == 'refs/heads/main-js') ]]; then
             TESTING_ON_JGS="true"
           else
             TESTING_ON_JGS="false"
