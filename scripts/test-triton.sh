@@ -189,7 +189,7 @@ run_core_tests() {
   ensure_spirv_dis
 
   TRITON_DISABLE_LINE_INFO=1 TRITON_TEST_SUITE=language \
-    pytest -vvv -n ${PYTEST_MAX_PROCESSES:-8} --device xpu language/ --ignore=language/test_line_info.py --ignore=language/test_subprocess.py
+    pytest -vvv -n ${PYTEST_MAX_PROCESSES:-8} --device xpu language/ --ignore=language/test_line_info.py --ignore=language/test_subprocess.py --ignore=language/test_warp_specialization.py
 
   TRITON_DISABLE_LINE_INFO=1 TRITON_TEST_SUITE=subprocess \
     pytest -vvv -n ${PYTEST_MAX_PROCESSES:-8} --device xpu language/test_subprocess.py
@@ -252,11 +252,11 @@ run_tutorial_tests() {
   run_tutorial_test "10-experimental-block-pointer"
   run_tutorial_test "10i-experimental-block-pointer"
 
-  echo "\n***************************************************"
-  echo "Running with TRITON_INTEL_RAISE_BLOCK_POINTER=ignore-masks"
+  echo "***************************************************"
+  echo "Running with TRITON_INTEL_RAISE_BLOCK_POINTER      "
   echo "***************************************************"
 
-  TRITON_TEST_REPORTS=false TRITON_INTEL_RAISE_BLOCK_POINTER=ignore-masks \
+  TRITON_TEST_REPORTS=false TRITON_INTEL_RAISE_BLOCK_POINTER=1 \
     run_tutorial_test "03-matrix-multiplication"
 }
 

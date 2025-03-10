@@ -65,15 +65,15 @@ public:
 
   void assertFail(RewriterBase &rewriter, Location loc, StringRef message,
                   StringRef file, StringRef func, int line) const override;
+
   int getSharedAddressSpace() const override;
+
+  int getAddressSpace(Attribute addressSpace) const override;
 
   bool supportVectorizedAtomics() const override;
 
   void storeOpAnnotation(triton::gpu::LocalStoreOp op, size_t localStoreOpCount,
                          Type type) const override;
-
-  Value getStackPointer(RewriterBase &rewriter,
-                        FunctionOpInterface funcOp) const override;
 
 private:
   void printfImpl(Value formatStrStart, int formatStrByteCount, ValueRange args,
