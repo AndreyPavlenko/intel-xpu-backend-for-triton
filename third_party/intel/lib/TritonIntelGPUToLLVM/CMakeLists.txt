@@ -2,8 +2,6 @@ add_triton_library(TritonIntelGPUToLLVM
     AllocateSharedMemory.cpp
     ArithOpsToLLVM.cpp
     BF16Casts.cpp
-    ControlFlowOpToLLVM.cpp
-    ConvertLayoutOpToLLVM/SharedToDotOperandDPAS.cpp
     ConvertLayoutOpToLLVM.cpp
     DecomposeUnsupportedConversions.cpp
     DotOpToLLVM/DPAS.cpp
@@ -17,7 +15,6 @@ add_triton_library(TritonIntelGPUToLLVM
     PrintOpToLLVM.cpp
     ReduceOpToLLVM.cpp
     TritonGPUToLLVM.cpp
-    ScanOpToLLVM.cpp
     SPMDOpToLLVM.cpp
     TargetInfo.cpp
     TensorPtrOpsToLLVM.cpp
@@ -26,7 +23,6 @@ add_triton_library(TritonIntelGPUToLLVM
     TypeConverter.cpp
     UpcastMXFPToLLVM.cpp
     Utility.cpp
-    ViewOpToLLVM.cpp
     Xe4ToLLVM.cpp
 
     DEPENDS
