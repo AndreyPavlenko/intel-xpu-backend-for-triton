@@ -9,7 +9,6 @@
 
 using namespace mlir;
 
-using mlir::LLVM::getWrappedMultiDimOffset;
 using ::mlir::LLVM::linearize;
 namespace {
 // declare vprintf(i8*, i8*) as external function
@@ -447,7 +446,7 @@ bool TargetInfo::warpReduce(RewriterBase &rewriter, Location loc,
         // For partitioned reduction we need to calculate the mask so that
         // each group of numLaneToReduce threads has the correct mask.
         unsigned bitmask = (1 << numLaneToReduce) - 1;
-        Value laneId = getLaneId(rewriter, loc, /*warpSize=*/32);
+        Value laneId = getLaneId(rewriter, loc);
         mask = b.shl(b.i32_val(bitmask),
                      b.and_(laneId, b.i32_val(~(numLaneToReduce - 1))));
       }
@@ -618,17 +617,16 @@ void TargetInfo::assertFail(RewriterBase &rewriter, Location loc,
 
 int TargetInfo::getSharedAddressSpace() const { return 3; }
 
-Value TargetInfo::getStackPointer(RewriterBase &rewriter,
-                                  FunctionOpInterface funcOp) const {
-  // See NOTE: [Additional Function Arguments]
-  if (!LLVM::isKernel(funcOp)) {
-    return funcOp.getArgument(funcOp.getNumArguments() - 2);
+int TargetInfo::getAddressSpace(Attribute addressSpace) const {
+  int spaceId = 0;
+  if (isa<triton::gpu::SharedMemorySpaceAttr,
+          triton::nvidia_gpu::TensorMemorySpaceAttr>(addressSpace)) {
+    spaceId = 3;
+  } else {
+    llvm::report_fatal_error(
+        "Only support SharedMemorySpace, TensorMemorySpace for now");
   }
-
-  auto mod = funcOp->getParentOfType<ModuleOp>();
-  auto globalBase = dyn_cast<LLVM::GlobalOp>(mod.lookupSymbol("global_smem"));
-  assert(globalBase);
-  return rewriter.create<LLVM::AddressOfOp>(funcOp.getLoc(), globalBase);
+  return spaceId;
 }
 
 bool TargetInfo::supportVectorizedAtomics() const {

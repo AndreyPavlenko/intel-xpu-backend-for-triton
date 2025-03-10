@@ -33,10 +33,6 @@ void populateConvertLayoutOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                            RewritePatternSet &patterns,
                                            PatternBenefit benefit);
 
-void populateViewOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
-                                  RewritePatternSet &patterns,
-                                  PatternBenefit benefit);
-
 void populateDotOpToLLVMPatterns(
     TritonIntelGPUToLLVMTypeConverter &typeConverter,
     RewritePatternSet &patterns, PatternBenefit benefit);
@@ -70,10 +66,6 @@ void populateReduceOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                     RewritePatternSet &patterns,
                                     const TargetInfoBase &targetInfo,
                                     PatternBenefit benefit);
-void populateScanOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
-                                  RewritePatternSet &patterns,
-                                  const TargetInfoBase &targetInfo,
-                                  PatternBenefit benefit);
 
 void populateTensorPtrOpsToLLVMPatterns(
     TritonIntelGPUToLLVMTypeConverter &typeConverter,

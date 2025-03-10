@@ -89,15 +89,14 @@ public:
 
   virtual int getSharedAddressSpace() const = 0;
 
+  virtual int getAddressSpace(Attribute addressSpace) const = 0;
+
   virtual bool supportVectorizedAtomics() const = 0;
 
   // Helper used by targets to annotate store operations during lowering to
   // llvm.
   virtual void storeOpAnnotation(triton::gpu::LocalStoreOp op,
                                  size_t localStoreOpCount, Type type) const {}
-
-  virtual Value getStackPointer(RewriterBase &rewriter,
-                                FunctionOpInterface funcOp) const = 0;
 
   virtual ~TargetInfoBase() {}
 };
