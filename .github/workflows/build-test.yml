@@ -135,7 +135,7 @@ jobs:
             TESTING_ON_JGS="true"
           elif [[ "${{ github.event_name }}" == 'pull_request' && "${{ github.base_ref }}" == 'refs/heads/main-js' ]]; then
             TESTING_ON_JGS="true"
-          elif [[ "${{ github.event_name }}" == 'push' && "${{ github.ref }}" == 'refs/heads/main-js') ]]; then
+          elif [[ "${{ github.event_name }}" == 'push' && "${{ github.ref }}" == 'refs/heads/main-js' ]]; then
             TESTING_ON_JGS="true"
           else
             TESTING_ON_JGS="false"
