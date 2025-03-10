@@ -115,7 +115,16 @@ jobs:
           llvm_repo: ${{ env.LLVM_REPO }}
           gh_token: ${{ secrets.GLADOS_TOKEN }}
 
-      - name: Set up environment and run tutorial test
+      - name: Lit tests
+        run: |
+          source /opt/intel/oneapi/setvars.sh
+          set -ex -o pipefail
+          source /jgssim/jgssim-env.sh
+          export BASE=$HOME
+          export PATH="$BASE/packages/llvm/bin:$PATH"
+          bash -v -x scripts/test-triton.sh --warning-reports --skip-pytorch-install --unit
+
+      - name: Sanity tutorial test
         run: |
           source /opt/intel/oneapi/setvars.sh
           set -ex -o pipefail
