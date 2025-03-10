@@ -34,6 +34,7 @@ from triton._internal_testing import (
     is_hip_cdna,
     is_hip_mi200,
     is_hip_mi300,
+    is_hip_mi350,
     is_xpu,
     get_arch,
     torch_float8_dtypes,
@@ -1706,6 +1707,79 @@ def test_tensor_atomic_rmw(shape, axis, num_ctas, dtype_x_str, check_return_val,
 
 
 @pytest.mark.interpreter
+@pytest.mark.parametrize("size, num_ctas, dtype_x_str", [(size, num_ctas, dtype_x_str)
+                                                         for size in [2, 4, 8, 32, 64, 128]
+                                                         for num_ctas in num_ctas_list
+                                                         for dtype_x_str in ['float16', 'float32']])
+def test_tensor_atomic_add_non_exclusive_offset(size, num_ctas, dtype_x_str, device):
+
+    @triton.jit
+    def kernel(X, val, NUM: tl.constexpr):
+        off = tl.arange(0, NUM)
+        offset = off[:, None] * NUM + off[None, :]
+        val = tl.load(val + offset)
+        tl.atomic_add(X + offset // 2, val)
+
+    shape = (size // 2, size)
+    x = torch.zeros(shape, dtype=getattr(torch, dtype_x_str), device=device)
+    val = torch.randn((size**2), dtype=getattr(torch, dtype_x_str), device=device)
+    kernel[(1, )](x, val, size, num_warps=1, num_ctas=num_ctas)
+    ref = val[0::2] + val[1::2]
+    torch.testing.assert_close(ref, x.reshape(math.prod(shape)))
+
+
+@pytest.mark.interpreter
+@pytest.mark.parametrize("shape, idx_order, mask_step, num_ctas, dtype_x_str",
+                         [(shape, idx_order, mask_step, num_ctas, dtype_x_str)
+                          for shape in [(2, 2), (4, 4), (5, 5), (6, 6), (8, 8)]
+                          for idx_order in ['increase', 'decrease', 'random_no_duplication', 'random']
+                          for mask_step in range(1, 5)
+                          for num_ctas in num_ctas_list
+                          for dtype_x_str in ['float16', 'float32']])
+def test_tensor_atomic_add_access_patterns(shape, idx_order, mask_step, num_ctas, dtype_x_str, device):
+    check_type_supported(dtype_x_str, device)
+    if is_interpreter():
+        pytest.xfail("not supported in the interpreter")
+
+    @triton.jit
+    def kernel(in_ptr, idx_ptr, out_ptr, shape0, shape1, mask_step, XBLOCK: tl.constexpr):
+        xoffset = tl.program_id(0) * XBLOCK
+        x_idx = xoffset + tl.arange(0, XBLOCK)[:]
+        mask = x_idx < shape0 * shape1
+        mask = mask and (x_idx % mask_step != 0)
+        idx_base = shape1 * (x_idx // shape1)
+        idx_offset = tl.load(idx_ptr + x_idx, mask)
+        in_elem = tl.load(in_ptr + x_idx, mask)
+        tl.atomic_add(out_ptr + (idx_offset + idx_base), in_elem, mask, sem='relaxed')
+
+    shape0, shape1 = shape
+    idx_row = torch.arange(0, shape1, device=device)
+    if idx_order == 'increase':
+        idx = torch.stack([idx_row.repeat_interleave(i + 1)[:shape1] for i in range(shape0)])
+    if idx_order == 'decrease':
+        idx = torch.stack([idx_row.flip(0).repeat_interleave(i + 1)[:shape1] for i in range(shape0)])
+    if idx_order == 'random_no_duplication':
+        idx = torch.stack([torch.randperm(shape1, device=device) for _ in idx_row])
+    if idx_order == 'random':
+        idx = torch.randint(0, shape1, size=(shape0, shape1), device=device)
+
+    val = torch.randn((shape0, shape1), dtype=getattr(torch, dtype_x_str), device=device)
+    dst = torch.randn((shape0, shape1), dtype=getattr(torch, dtype_x_str), device=device)
+
+    dst_ref = dst.clone()
+
+    cnt = 0
+    for i, row in enumerate(idx):
+        for j, elem in enumerate(row):
+            if cnt % mask_step != 0:
+                dst_ref[i][elem] += val[i][j]
+            cnt += 1
+
+    kernel[(1, )](val, idx, dst, shape0, shape1, mask_step, 64, num_ctas=num_ctas)
+    np.testing.assert_allclose(to_numpy(dst_ref), to_numpy(dst), atol=1e-2)
+
+
+@pytest.mark.interpreter
 @pytest.mark.parametrize("num_ctas", num_ctas_list)
 def test_tensor_atomic_rmw_block(num_ctas, device):
     shape = (8, 8)
@@ -2967,8 +3041,6 @@ def test_reduce_layouts(M, N, src_layout, axis, epilogue_kind, dtype_str, add_ov
         pytest.xfail("Skipping sum reduction on float16 due to accuracy issues")
     if is_hip() and isinstance(src_layout, LinearLayout):
         pytest.skip("FIXME: LinearLayout not supported on HIP")
-    if is_xpu() and isinstance(src_layout, LinearLayout) and epilogue_kind == "reduce1d":
-        pytest.skip("FIXME: Linear layout not supported on XPU")
 
     if isinstance(src_layout, MmaLayout) and src_layout.version == 3:
         src_layout.instr_shape[2] = 16 if dtype_str == "float16" else 8
@@ -3185,6 +3257,48 @@ def test_convert1d(M, src_layout, dst_layout, src_dim, dst_dim, device, tmp_path
     pgm = kernel[(1, 1, 1)](x_tri, y_tri)
     y_ref = x
     np.testing.assert_allclose(y_ref, y_tri.cpu().numpy(), rtol=0.01, atol=1e-3)
+
+
+@pytest.mark.parametrize("M", [64, 128, 256])
+@pytest.mark.parametrize("src_layout", filter_layouts(layouts))
+@pytest.mark.parametrize("dst_layout", filter_layouts(layouts))
+@pytest.mark.parametrize("src_dim", [0, 1])
+@pytest.mark.parametrize("dst_dim", [0, 1])
+def test_convert1d_bool(M, src_layout, dst_layout, src_dim, dst_dim, device, tmp_path: pathlib.Path):
+
+    ir = f"""
+    #dst = {dst_layout}
+    #src = {src_layout}
+    module attributes {{"{GPU_DIALECT}.num-warps" = 4 : i32, "ttg.num-ctas" = 1 : i32, "ttg.threads-per-warp" = {THREADS_PER_WARP} : i32}} {{
+        tt.func public @kernel(%arg0: !tt.ptr<i8> {{tt.divisibility = 16 : i32}}, %arg1: !tt.ptr<i32> {{tt.divisibility = 16 : i32}}) {{
+            %cst = arith.constant dense<0> : tensor<{M}xi8, #{GPU_DIALECT}.slice<{{dim = {src_dim}, parent = #src}}>>
+            %0 = tt.splat %arg0 : !tt.ptr<i8> -> tensor<{M}x!tt.ptr<i8>, #{GPU_DIALECT}.slice<{{dim = {src_dim}, parent = #src}}>>
+            %1 = tt.make_range {{end = {M} : i32, start = 0 : i32}} : tensor<{M}xi32, #{GPU_DIALECT}.slice<{{dim = {src_dim}, parent = #src}}>>
+            %2 = tt.addptr %0, %1 : tensor<{M}x!tt.ptr<i8>, #{GPU_DIALECT}.slice<{{dim = {src_dim}, parent = #src}}>>, tensor<{M}xi32, #{GPU_DIALECT}.slice<{{dim = {src_dim}, parent = #src}}>>
+            %3 = tt.load %2 : tensor<{M}x!tt.ptr<i8>, #{GPU_DIALECT}.slice<{{dim = {src_dim}, parent = #src}}>>
+            %4 = arith.cmpi ne, %3, %cst : tensor<{M}xi8, #{GPU_DIALECT}.slice<{{dim = {src_dim}, parent = #src}}>>
+            %5 = tt.splat %arg1 : !tt.ptr<i32> -> tensor<{M}x!tt.ptr<i32>, #{GPU_DIALECT}.slice<{{dim = {dst_dim}, parent = #dst}}>>
+            %6 = tt.make_range {{end = {M} : i32, start = 0 : i32}} : tensor<{M}xi32, #{GPU_DIALECT}.slice<{{dim = {dst_dim}, parent = #dst}}>>
+            %7 = tt.addptr %5, %6 : tensor<{M}x!tt.ptr<i32>, #{GPU_DIALECT}.slice<{{dim = {dst_dim}, parent = #dst}}>>, tensor<{M}xi32, #{GPU_DIALECT}.slice<{{dim = {dst_dim}, parent = #dst}}>>
+            %8 = {GPU_DIALECT}.convert_layout %4 : tensor<{M}xi1, #{GPU_DIALECT}.slice<{{dim = {src_dim}, parent = #src}}>> -> tensor<{M}xi1, #{GPU_DIALECT}.slice<{{dim = {dst_dim}, parent = #dst}}>>
+            %9 = arith.extui %8 : tensor<{M}xi1, #{GPU_DIALECT}.slice<{{dim = {dst_dim}, parent = #dst}}>> to tensor<{M}xi32, #{GPU_DIALECT}.slice<{{dim = {dst_dim}, parent = #dst}}>>
+            tt.store %7, %9 : tensor<{M}x!tt.ptr<i32>, #{GPU_DIALECT}.slice<{{dim = {dst_dim}, parent = #dst}}>>
+            tt.return
+        }}
+    }}
+    """
+    temp_file = tmp_path / "test_convert1d.ttgir"
+    temp_file.write_text(ir)
+    kernel = triton.compile(str(temp_file))
+
+    rs = RandomState(17)
+    x = rs.randint(0, 2, (M, )).astype('bool')
+    y = np.zeros((M, ), dtype='int32')
+    x_tri = torch.tensor(x, device=device)
+    y_tri = torch.tensor(y, device=device)
+    pgm = kernel[(1, 1, 1)](x_tri, y_tri)
+    y_ref = x
+    np.testing.assert_allclose(y_ref, y_tri.cpu().numpy(), rtol=0, atol=0)
 
 
 @triton.jit
@@ -3447,6 +3561,10 @@ def convert_fp8_to_fp32(x, device, dtype_str):
         return torch.tensor(x, device=device).view(torch.float8_e4m3fn).to(torch.float32)
     elif dtype_str == 'float8e5':
         return torch.tensor(x, device=device).view(torch.float8_e5m2).to(torch.float32)
+    elif dtype_str == 'float8e4b8':
+        return torch.tensor(x, device=device).view(torch.float8_e4m3fnuz).to(torch.float32)
+    elif dtype_str == 'float8e5b16':
+        return torch.tensor(x, device=device).view(torch.float8_e5m2fnuz).to(torch.float32)
     assert "Unsupported float8 dtype"
 
 
@@ -3579,12 +3697,15 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, input_precision, in_dty
             if capability[0] < 9 and in_dtype == 'float8e4nv':
                 pytest.skip("float8e4nv not supported on sm <= 80")
 
-        if is_hip() and (in_dtype == 'float8e4nv' or in_dtype == 'float8e5'):
-            pytest.skip("float8e4nv and float8e5 not supported on HIP")
-        if is_hip() and not ((input_precision == "ieee") or (input_precision == "tf32" and is_hip_mi300())):
-            pytest.skip(f"{input_precision} not supported on HIP")
-        if is_hip() and (kpack == 2 and in_dtype == 'int8' and K < 64):
-            pytest.skip("kpack too large for K")
+        if is_hip():
+            if in_dtype in ("float8e5", "float8e4nv") and not is_hip_mi350():
+                pytest.skip(f"{in_dtype} only supported on mi350")
+            if in_dtype in ("float8e5b16", "float8e4b8") and not is_hip_mi300():
+                pytest.skip(f"{in_dtype} only supported on mi300")
+            if not ((input_precision == "ieee") or (input_precision == "tf32" and is_hip_mi300())):
+                pytest.skip(f"{input_precision} not supported on HIP")
+            if kpack == 2 and in_dtype == 'int8' and K < 64:
+                pytest.skip("kpack too large for K")
         if not is_hip() and kpack == 2:
             pytest.xfail("Skip duplicated tests on nv path")
 
@@ -3713,6 +3834,10 @@ def test_dot(M, N, K, num_warps, col_a, col_b, epilogue, input_precision, in_dty
                 z_fp8 = torch.tensor(z_ref, dtype=torch.float8_e4m3fn)
             elif in_dtype == 'float8e5':
                 z_fp8 = torch.tensor(z_ref, dtype=torch.float8_e5m2)
+            elif in_dtype == 'float8e4b8':
+                z_fp8 = torch.tensor(z_ref, dtype=torch.float8_e4m3fnuz)
+            elif in_dtype == 'float8e5b16':
+                z_fp8 = torch.tensor(z_ref, dtype=torch.float8_e5m2fnuz)
             else:
                 assert "Unsupported float8 dtype"
             z_ref = to_numpy(z_fp8.to(torch.float32))
@@ -3792,8 +3917,8 @@ def test_scaled_dot(M, N, K, col_a, col_b, rhs_scale, mxfp_type, normal_type, nu
         if not is_hip_cdna():
             pytest.skip("scaled_dot only implemented for HIP CDNA")
         if "e4m3" in (mxfp_type, normal_type):
-            if not is_hip_mi300():
-                pytest.skip(f"scaled_dot({mxfp_type}, {normal_type}) only implemented for MI300")
+            if not (is_hip_mi300() or is_hip_mi350()):
+                pytest.skip(f"scaled_dot({mxfp_type}, {normal_type}) only implemented for MI300 and MI350")
         if mma == 16 and K == 64:
             pytest.skip(f"K == {K} too small for mfma {mma} in scaled_dot")
 
@@ -3966,7 +4091,15 @@ def test_scaled_dot(M, N, K, col_a, col_b, rhs_scale, mxfp_type, normal_type, nu
             # Clamp to avoid relative error issues
             ret.clamp_(-2**comp_dtype_max_exp, 2**comp_dtype_max_exp - 1)
         else:
-            ret = torch.randint(256, shape, dtype=torch.uint8, device=device)
+            if is_hip_mi350():
+                # On other chips, the A/B operands are upcasted to fp16/bf16
+                # before matmul, which has larger range to avoid overflow.
+                # On MI350, we use the V_MFMA_*_F8F6F4 instructions to
+                # directly calculate matmul on F8F6F4 data. So we need
+                # to narrow down the range of input to avoid overflow.
+                ret = torch.randint(20, 40, shape, dtype=torch.uint8, device=device)
+            else:
+                ret = torch.randint(256, shape, dtype=torch.uint8, device=device)
         if col_major:
             ret = ret.mT
         return ret
@@ -6485,7 +6618,8 @@ def matmul_kernel(  #
 @pytest.mark.parametrize("M, N, K", [(128, 256, 256)])
 @pytest.mark.parametrize("BLOCK_M, BLOCK_N, BLOCK_K", [(128, 256, 128), (64, 64, 64)])
 @pytest.mark.parametrize(
-    "in_type_str", ['float8e5', 'float8e5b16', 'float8e4b8'] if is_hip() else ['float8e5', 'float8e4nv', 'float8e4b15'])
+    "in_type_str",
+    ['float8e5', 'float8e5b16', 'float8e4b8', 'float8e4nv'] if is_hip() else ['float8e5', 'float8e4nv', 'float8e4b15'])
 @pytest.mark.parametrize("low_precision_acc", [0, 32, 64, 128])
 def test_dot_max_num_imprecise_acc(M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, in_type_str, low_precision_acc, device):
     num_stages = 3
@@ -6497,6 +6631,8 @@ def test_dot_max_num_imprecise_acc(M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, in_type_s
         num_stages = 2
         if in_type_str in ("float8e5b16", "float8e4b8") and not is_hip_mi300():
             pytest.skip(f"{in_type_str} only supported on mi300")
+        if in_type_str in ("float8e5", "float8e4nv") and not is_hip_mi350():
+            pytest.skip(f"{in_type_str} only supported on mi350")
 
     check_type_supported(in_type_str, device)
     A = numpy_random((M, K), dtype_str=in_type_str)
@@ -6757,8 +6893,6 @@ def test_tl_range_num_stages(device):
 
 
 def test_tl_range_fuse():
-    if is_xpu():
-        pytest.skip("loop fusion is not enabled on XPU")
     if is_hip():
         pytest.skip("loop fusion is not enabled on AMD")
 

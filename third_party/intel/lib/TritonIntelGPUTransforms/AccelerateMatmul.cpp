@@ -1,4 +1,5 @@
 #include "Dialect/TritonIntelGPU/IR/Attributes.h"
+#include "Dialect/TritonIntelGPU/Transforms/DecomposeScaledBlocked.h"
 #include "Dialect/TritonIntelGPU/Transforms/Utility.h"
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/IR/Builders.h"
@@ -13,6 +14,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/ADT/TypeSwitch.h"
 #include <optional>
 
@@ -215,16 +217,16 @@ public:
     if (rank == 3)
       return rewriter.notifyMatchFailure(scaledDotOp, "NYI: 3d case");
 
-    TensorValue a = scaledDotOp.getLhs();
-    TensorValue b = scaledDotOp.getRhs();
-    TensorValue aScale = scaledDotOp.getLhsScale();
-    TensorValue bScale = scaledDotOp.getRhsScale();
+    TensorValue a = scaledDotOp.getA();
+    TensorValue b = scaledDotOp.getB();
+    TensorValue aScale = scaledDotOp.getAScale();
+    TensorValue bScale = scaledDotOp.getBScale();
     if (aScale && bScale)
       return rewriter.notifyMatchFailure(scaledDotOp,
                                          "NYI: both LHS and RHS scale");
 
-    tt::ScaleDotElemType aElemType = scaledDotOp.getLhsType();
-    tt::ScaleDotElemType bElemType = scaledDotOp.getRhsType();
+    tt::ScaleDotElemType aElemType = scaledDotOp.getAElemType();
+    tt::ScaleDotElemType bElemType = scaledDotOp.getBElemType();
     auto supportsTypes = [](tt::ScaleDotElemType elemType) {
       return elemType == tt::ScaleDotElemType::E2M1 ||
              elemType == tt::ScaleDotElemType::E4M3 ||
@@ -364,10 +366,10 @@ private:
   getDPASEncoding(tt::DotScaledOp scaledDotOp,
                   PatternRewriter &rewriter) const {
     auto mod = scaledDotOp->getParentOfType<ModuleOp>();
-    TensorValue a = scaledDotOp.getLhs();
-    TensorValue b = scaledDotOp.getRhs();
-    TensorValue aScale = scaledDotOp.getLhsScale();
-    TensorValue bScale = scaledDotOp.getRhsScale();
+    TensorValue a = scaledDotOp.getA();
+    TensorValue b = scaledDotOp.getB();
+    TensorValue aScale = scaledDotOp.getAScale();
+    TensorValue bScale = scaledDotOp.getBScale();
     assert((!aScale || !bScale) && "NYI: both LHS and RHS scale");
 
     Type elemType =
@@ -617,22 +619,22 @@ static void sinkTransposeOp(tt::TransOp input) {
 }
 
 static tt::TransOp transposeDotOp(tt::DotScaledOp dotOp) {
-  assert(dotOp.getLhsScale() == nullptr && dotOp.getRhsScale() != nullptr &&
+  assert(dotOp.getAScale() == nullptr && dotOp.getBScale() != nullptr &&
          "Transpose DotOp expects scale on RHS");
   OpBuilder builder(dotOp);
-  Value lhs = dotOp.getLhs();
+  Value lhs = dotOp.getA();
   std::array<int, 2> transOrder = {1, 0};
   auto lhsTransposed =
       builder.create<tt::TransOp>(lhs.getLoc(), lhs, transOrder);
-  Value rhs = dotOp.getRhs();
+  Value rhs = dotOp.getB();
   auto rhsTransposed =
       builder.create<tt::TransOp>(rhs.getLoc(), rhs, transOrder);
   Value c = dotOp.getC();
   auto cTransposed = builder.create<tt::TransOp>(c.getLoc(), c, transOrder);
   auto result = builder.create<tt::DotScaledOp>(
       dotOp.getLoc(), cTransposed.getType(), rhsTransposed, lhsTransposed,
-      cTransposed, dotOp.getRhsScale(), dotOp.getLhsScale(), dotOp.getRhsType(),
-      dotOp.getLhsType(), dotOp.getFastMath());
+      cTransposed, dotOp.getBScale(), dotOp.getAScale(), dotOp.getBElemType(),
+      dotOp.getAElemType(), dotOp.getFastMath());
   auto transOp =
       builder.create<tt::TransOp>(result.getLoc(), result, transOrder);
   dotOp.replaceAllUsesWith(transOp.getOperation());
@@ -643,7 +645,7 @@ static tt::TransOp transposeDotOp(tt::DotScaledOp dotOp) {
 static void transposeDots(ModuleOp m) {
   SmallVector<tt::DotScaledOp> toTranspose;
   m.walk([&](tt::DotScaledOp dotOp) -> void {
-    if (dotOp.getLhsScale() == nullptr && dotOp.getRhsScale() != nullptr)
+    if (dotOp.getAScale() == nullptr && dotOp.getBScale() != nullptr)
       toTranspose.push_back(dotOp);
   });
   SmallVector<tt::TransOp> transposes;
@@ -673,7 +675,17 @@ public:
     transposeDots(m);
 
     RewritePatternSet patterns(context);
-    patterns.add<BlockedToDPAS, DecomposeScaledBlocked>(context, dpasAnalysis);
+    // TODO: This ENV variable will be removed in the Fp4ToFp lowering PR
+    // Keep it here to maintain old implementation functionality.
+    if (!mlir::triton::tools::getBoolEnv(
+            "TRITON_INTEL_DECOMPOSE_SCALED_BLOCKED"))
+      patterns.add<BlockedToDPAS, DecomposeScaledBlocked>(context,
+                                                          dpasAnalysis);
+    else {
+      constexpr int benefitDefault = 1;
+      patterns.add<BlockedToDPAS>(context, dpasAnalysis);
+      ttgi::populateDecomposeScaledBlockedPatterns(patterns, benefitDefault);
+    }
     if (applyPatternsGreedily(m, std::move(patterns)).failed())
       signalPassFailure();
 
