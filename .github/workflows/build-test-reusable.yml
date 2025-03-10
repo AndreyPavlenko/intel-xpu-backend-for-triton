@@ -64,6 +64,10 @@ on:
         description: Use SPIR-V backend
         type: boolean
         default: false
+      jgs_env:
+        description: Activate JGS simulator environment
+        type: boolean
+        default: false
 
 permissions: read-all
 
@@ -120,6 +124,7 @@ jobs:
         with:
           ref: ${{ inputs.pytorch_ref }}
           mode: ${{ inputs.pytorch_mode }}
+          jgs_env: ${{ inputs.jgs_env}}
 
       - name: Install pass_rate dependencies
         run: |
@@ -130,6 +135,7 @@ jobs:
         with:
           build_llvm: ${{ inputs.build_llvm }}
           use_spirv_backend: ${{ inputs.use_spirv_backend }}
+          gh_token: ${{ secrets.GLADOS_TOKEN }}
 
       - name: Create test-triton command line
         run: |
@@ -149,7 +155,7 @@ jobs:
 
           {
             echo SKIPLIST="$skiplist"
-            echo TRITON_TEST_CMD="bash -v -x scripts/test-triton.sh --warning-reports --skip-pytorch-install --reports-dir $GITHUB_WORKSPACE/reports ${{ inputs.ignore_errors && '--ignore-errors' || '' }} $skiplist"
+            echo TRITON_TEST_CMD="${{ inputs.jgs_env && 'source /jgssim/jgssim-env.sh && ' }} bash -v -x scripts/test-triton.sh --warning-reports --skip-pytorch-install --reports-dir $GITHUB_WORKSPACE/reports ${{ inputs.ignore_errors && '--ignore-errors' || '' }} $skiplist"
           } | tee -a $GITHUB_ENV
 
       - name: Run unit tests

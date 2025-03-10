@@ -43,14 +43,20 @@ on:
         description: Use Python built with pyenv
         type: boolean
         default: false
+      jgs_env:
+        description: Activate JGS simulator environment
+        type: boolean
+        default: false
 
   pull_request:
     branches:
       - main
+      - main-js
       - release/**
   push:
     branches:
       - main
+      - main-js
       - release/**
 
 permissions: read-all
@@ -102,6 +108,7 @@ jobs:
 
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      TESTING_ON_JGS: ${{ steps.matrix.outputs.TESTING_ON_JGS }}
 
     steps:
       - name: Inputs
@@ -120,6 +127,21 @@ jobs:
           fi
           echo "matrix=$matrix" | tee -a $GITHUB_OUTPUT
 
+          echo '${{ github.event_name }}' = ${{ github.event_name }}
+          echo '${{ inputs.jgs_env }}' = ${{ inputs.jgs_env }}
+          echo '${{ github.base_ref }}' = ${{ github.base_ref }}
+          echo '${{ github.ref }}' = ${{ github.ref }}
+          if [[ ${{ github.event_name }} == 'workflow_dispatch' && ${{ inputs.jgs_env }} == "true" ]]; then
+            TESTING_ON_JGS="true"
+          elif [[ ${{ github.event_name }} == 'pull_request' && ${{ github.base_ref }} == 'refs/heads/main-js' ]]; then
+            TESTING_ON_JGS="true"
+          elif [[ ${{ github.event_name }} == 'push' && ${{ github.ref }} == 'refs/heads/main-js') ]]; then
+            TESTING_ON_JGS="true"
+          else
+            TESTING_ON_JGS="false"
+          fi
+          echo "TESTING_ON_JGS=$TESTING_ON_JGS" | tee -a $GITHUB_OUTPUT
+
   integration-tests:
     name: Integration tests matrix
     needs: prepare
@@ -130,7 +152,7 @@ jobs:
     uses: ./.github/workflows/build-test-reusable.yml
     with:
       driver_version: ${{ matrix.driver }}
-      runner_label: ${{ inputs.runner_label }}
+      runner_label: ${{ needs.prepare.outputs.TESTING_ON_JGS == 'true' && 'jgs' || inputs.runner_label }}
       pytorch_ref: ${{ inputs.pytorch_ref }}
       pytorch_mode: ${{ inputs.pytorch_mode || 'source' }}
       python_version: ${{ matrix.python }}
@@ -140,3 +162,4 @@ jobs:
       run_name: ${{ inputs.run_name }}
       enable_unskip: ${{ inputs.enable_unskip || false }}
       use_pyenv_python: ${{ inputs.use_pyenv_python || false }}
+      jgs_env: ${{ needs.prepare.outputs.TESTING_ON_JGS == 'true' }}
