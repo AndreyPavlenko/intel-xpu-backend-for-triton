@@ -133,7 +133,7 @@ jobs:
           echo github.ref = ${{ github.ref }}
           if [[ "${{ github.event_name }}" == 'workflow_dispatch' && "${{ inputs.jgs_env }}" == "true" ]]; then
             TESTING_ON_JGS="true"
-          elif [[ "${{ github.event_name }}" == 'pull_request' && "${{ github.base_ref }}" == 'refs/heads/main-js' ]]; then
+          elif [[ "${{ github.event_name }}" == 'pull_request' && "${{ github.base_ref }}" == 'main-js' ]]; then
             TESTING_ON_JGS="true"
           elif [[ "${{ github.event_name }}" == 'push' && "${{ github.ref }}" == 'refs/heads/main-js' ]]; then
             TESTING_ON_JGS="true"
