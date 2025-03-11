@@ -158,7 +158,7 @@ jobs:
 
           {
             echo SKIPLIST="$skiplist"
-            echo TRITON_TEST_CMD="${{ inputs.jgs_env && 'source /jgssim/jgssim-env.sh && ' }}bash -v -x scripts/test-triton.sh --warning-reports --skip-pytorch-install --reports-dir $GITHUB_WORKSPACE/reports ${{ inputs.ignore_errors && '--ignore-errors' || '' }} $skiplist"
+            echo TRITON_TEST_CMD="${{ inputs.jgs_env && 'export PATH="$HOME/packages/llvm/bin:$PATH" && source /jgssim/jgssim-env.sh && ' }}bash -v -x scripts/test-triton.sh --warning-reports --skip-pytorch-install --reports-dir $GITHUB_WORKSPACE/reports ${{ inputs.ignore_errors && '--ignore-errors' || '' }} $skiplist"
           } | tee -a $GITHUB_ENV
 
       - name: Run unit tests

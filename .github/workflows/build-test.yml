@@ -120,7 +120,7 @@ jobs:
       - name: Matrix
         id: matrix
         run: |
-          echo github.event_name  = ${{ github.event_name }}
+          echo github.event_name = ${{ github.event_name }}
           echo inputs.jgs_env = ${{ inputs.jgs_env }}
           echo github.base_ref = ${{ github.base_ref }}
           echo github.ref = ${{ github.ref }}
