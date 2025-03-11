@@ -360,7 +360,7 @@ run_inductor_tests() {
   ZE_AFFINITY_MASK=0 python pytorch/benchmarks/dynamo/huggingface.py --accuracy --float32 -dxpu -n10 --no-skip --dashboard --inference --freezing --total-partitions 1 --partition-id 0 --only AlbertForMaskedLM --backend=inductor --timeout=4800 --output=$(pwd -P)/inductor_log.csv
 
   cat inductor_log.csv
-  grep AlbertForMaskedLM inductor_log.csv | grep -q ,pass,
+  grep AlbertForMaskedLM inductor_log.csv | grep -q ,pass, || $TRITON_TEST_IGNORE_ERRORS
 }
 
 test_triton() {
