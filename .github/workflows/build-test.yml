@@ -51,12 +51,12 @@ on:
   pull_request:
     branches:
       - main
-      - main-js
+#      - main-js
       - release/**
   push:
     branches:
       - main
-      - main-js
+#      - main-js
       - release/**
 
 permissions: read-all
