@@ -2200,12 +2200,10 @@ def test_interleave(device, debug):
         z = tl.interleave(tl.arange(0, N), tl.arange(N, 2 * N))
         tl.store(Z + tl.arange(0, 2 * N), z)
 
-    x = torch.arange(0, 128).to(torch.int32)
-    y = torch.arange(128, 256).to(torch.int32)
+    x = torch.arange(0, 128, device=device).to(torch.int32)
+    y = torch.arange(128, 256, device=device).to(torch.int32)
     z_ref = torch.stack([x, y], dim=-1).reshape(256)
-    z = torch.zeros_like(z_ref).to(device)
-    x = x.to(device)
-    y = y.to(device)
+    z = torch.zeros_like(z_ref)
     kernel[(1, )](z, N=128)
 
     np.testing.assert_equal(to_numpy(z_ref), to_numpy(z))
@@ -2220,7 +2218,7 @@ def test_interleave_scalars(device):
         tl.static_assert(z.shape == [tl.constexpr(2)])
         tl.store(Z + tl.arange(0, 2), z)
 
-    z = torch.zeros(2).to(device)
+    z = torch.zeros(2, device=device)
     kernel[(1, )](10, 20, z)
 
     np.testing.assert_equal([10, 20], to_numpy(z))
@@ -4582,8 +4580,8 @@ def test_masked_load_scalar(num_ctas, mask_val, other_val, device):
     input_val = 4.0
     size = 128
     dtype = torch.float32
-    input = torch.full((size, ), input_val, dtype=dtype).to(device)
-    output = torch.zeros((size, ), dtype=dtype).to(device)
+    input = torch.full((size, ), input_val, dtype=dtype, device=device)
+    output = torch.zeros((size, ), dtype=dtype, device=device)
 
     @triton.jit
     def kernel(in_ptr, out_ptr, size: tl.constexpr, mask: tl.constexpr, other: tl.constexpr):
@@ -4594,11 +4592,11 @@ def test_masked_load_scalar(num_ctas, mask_val, other_val, device):
     kernel[(1, )](input, output, size, mask_val, other_val, num_ctas=num_ctas)
 
     if mask_val:
-        reference_out = torch.full((size, ), input_val, dtype=dtype)
+        reference_out = torch.full((size, ), input_val, dtype=dtype, device=device)
     else:
-        reference_out = torch.full((size, ), other_val, dtype=dtype)
+        reference_out = torch.full((size, ), other_val, dtype=dtype, device=device)
 
-    torch.testing.assert_close(output.cpu(), reference_out)
+    torch.testing.assert_close(output, reference_out)
 
 
 # Testing masked loads with a copy to shared memory.
@@ -6555,12 +6553,10 @@ def test_ptx_cast(dtype_str, device):
         triton_dtype = tl.float32
 
     s0 = 4
-    buf11 = -torch.ones((6 * s0, 197, 197), dtype=torch_dtype)
-    buf14 = -torch.ones((s0, 6, 197, 197), dtype=torch_dtype)
-    buf11 = buf11.to(device)
-    buf14 = buf14.to(device)
+    buf11 = -torch.ones((6 * s0, 197, 197), device=device, dtype=torch_dtype)
+    buf14 = -torch.ones((s0, 6, 197, 197), device=device, dtype=torch_dtype)
     kernel[(4728, )](buf11, buf14, 1182 * s0, 197, triton_dtype, 1, 256, num_warps=2)
-    assert buf14.cpu().to(torch.float32).mean() == -2.0
+    assert buf14.to(torch.float32).mean() == -2.0
 
 
 # -----------------------
@@ -6828,18 +6824,14 @@ def test_clamp_symmetric(dtype, device):
 
     size = 128
 
-    x = torch.randn((size, ), dtype=getattr(torch, dtype))
-    limit = torch.randn((size, ), dtype=getattr(torch, dtype)).abs()
-    out = torch.zeros_like(x, dtype=getattr(torch, dtype))
-    ref = torch.zeros_like(x, dtype=getattr(torch, dtype))
+    x = torch.randn((size, ), device=device, dtype=getattr(torch, dtype))
+    limit = torch.randn((size, ), device=device, dtype=getattr(torch, dtype)).abs()
+    out = torch.zeros_like(x, device=device, dtype=getattr(torch, dtype))
+    ref = torch.zeros_like(x, device=device, dtype=getattr(torch, dtype))
 
-    x = x.to(device)
-    limit = limit.to(device)
-    out = out.to(device)
-    ref = ref.to(device)
     kernel[(size, )](x, limit, out, ref, x.numel(), BLOCK_SIZE=size)
 
-    torch.testing.assert_close(out.cpu(), ref.cpu())
+    torch.testing.assert_close(out, ref)
 
 
 # -----------------------
@@ -7186,15 +7178,14 @@ def test_chained_reductions(in_shape, perm, red_dims, device):
         st_idx = tl.arange(0, r.shape[0] * r.shape[1]).reshape(r.shape)
         tl.store(Out + st_idx, r)
 
-    input = torch.randint(0, 1000, in_shape, dtype=torch.int32)
+    input = torch.randint(0, 1000, in_shape, device=device, dtype=torch.int32)
     temp = torch.permute(input, perm).contiguous()
     ref = torch.sum(torch.sum(torch.sum(temp, dim=red_dims[0]), dim=red_dims[1]), dim=red_dims[2])
-    result = torch.empty_like(ref).to(device)
-    input = input.to(device)
+    result = torch.empty_like(ref)
     kernel[(1, )](input, result, input.shape[0], input.shape[1], input.shape[2], input.shape[3], input.shape[4],
                   perm[0], perm[1], perm[2], perm[3], perm[4], red_dims[0], red_dims[1], red_dims[2])
 
-    assert torch.all(ref == result.cpu())
+    assert torch.all(ref == result)
 
 
 @triton.jit
