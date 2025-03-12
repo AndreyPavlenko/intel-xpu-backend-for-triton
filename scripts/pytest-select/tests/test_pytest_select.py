@@ -56,7 +56,12 @@ def test_missing_selection_file_fails(testdir, option_name):
         ),
         (
             "--select-from-file",
-            ["{testfile}::test_a[1-2]", "test_a[1-3]", "test_a[3-1]", "test_that_does_not_exist"],
+            [
+                "{testfile}::test_a[1-2]",
+                "test_a[1-3]",
+                "test_a[3-1]",
+                "test_that_does_not_exist",
+            ],
             1,
             {"failed": 2},
             [
@@ -76,7 +81,12 @@ def test_missing_selection_file_fails(testdir, option_name):
         ),
         (
             "--deselect-from-file",
-            ["{testfile}::test_a[1-2]", "test_a[1-3]", "test_a[3-1]", "test_that_does_not_exist"],
+            [
+                "{testfile}::test_a[1-2]",
+                "test_a[1-3]",
+                "test_a[3-1]",
+                "test_that_does_not_exist",
+            ],
             0,
             {"passed": 2},
             [
@@ -85,6 +95,13 @@ def test_missing_selection_file_fails(testdir, option_name):
                 r"\s+- test_a\[3-1\]",
                 r"\s+- test_that_does_not_exist",
             ],
+        ),
+        (
+            "--deselect-from-file",
+            ["{testfile}::test_a"],
+            5,
+            {"passed": 0, "failed": 0},
+            [],
         ),
     ),
 )
@@ -109,6 +126,8 @@ def test_tests_are_selected(testdir, select_option, exit_code, select_content, o
 def test_fail_on_missing(testdir, deselect):
     testdir.makefile(".py", TEST_CONTENT)
     selectfile = testdir.makefile(".txt", "test_a[1-1]", "test_a[2-1]")
+    prefix = "de" if deselect else ""
+    n_prefix = "" if deselect else "de"
     result = testdir.runpytest(
         "-v",
         "--select-fail-on-missing",
@@ -117,9 +136,8 @@ def test_fail_on_missing(testdir, deselect):
     )
     assert result.ret == 4
     result.stderr.re_match_lines([
-        (fr"ERROR: pytest-select: Not all {'de' if deselect else ''}selected tests exist "
-         fr"\(or have been {'' if deselect else 'de'}selected otherwise\)."),
-        f"Missing {'de' if deselect else ''}selected test names:",
+        f"ERROR: pytest-select: Not all {prefix}selected tests exist (or have been {n_prefix}selected otherwise).",
+        f"Missing {prefix}selected test names:",
         "  - test_a[2-1]",
     ])
 
