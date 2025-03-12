@@ -16,3 +16,4 @@ pytest-forked
 pytest-rerunfailures
 pytest-select
 pytest-timeout
+./scripts/pytest-select
