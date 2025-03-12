@@ -124,35 +124,37 @@ def _load_test_names(select_file_name) -> set[str]:
 
 
 def pytest_collection_modifyitems(session, config, items):  # pylint: disable=W0613
-    if (select_config := SelectConfig.from_config(config)) is not None:
-        seen_test_names = set()
-        selected_items = []
-        deselected_items = []
-        variant_pattern = re.compile(r"^(.*?)\[(.+)\]$")
+    select_config = SelectConfig.from_config(config)
+    if select_config is None:
+        return
+    seen_test_names = set()
+    selected_items = []
+    deselected_items = []
+    variant_pattern = re.compile(r"^(.*?)\[(.+)\]$")
 
-        test_names = _load_test_names(select_config.file_path)
+    test_names = _load_test_names(select_config.file_path)
 
-        for item in items:
-            variant_match = variant_pattern.findall(item.nodeid)
-            if len(variant_match) == 1:
-                item_path = variant_match[0][0]
-                seen_test_names.add(item_path)
-            else:
-                item_path = item.nodeid
-            if (item.name in test_names or item.nodeid in test_names or item_path in test_names):
-                selected_items.append(item)
-            else:
-                deselected_items.append(item)
+    for item in items:
+        variant_match = variant_pattern.findall(item.nodeid)
+        if len(variant_match) == 1:
+            item_path = variant_match[0][0]
+            seen_test_names.add(item_path)
+        else:
+            item_path = item.nodeid
+        if (item.name in test_names or item.nodeid in test_names or item_path in test_names):
+            selected_items.append(item)
+        else:
+            deselected_items.append(item)
 
-            seen_test_names.add(item.name)
-            seen_test_names.add(item.nodeid)
+        seen_test_names.add(item.name)
+        seen_test_names.add(item.nodeid)
 
-        if select_config.deselect_from_file:
-            # We are *de*selecting, flip collections
-            selected_items, deselected_items = deselected_items, selected_items
+    if select_config.deselect_from_file:
+        # We are *de*selecting, flip collections
+        selected_items, deselected_items = deselected_items, selected_items
 
-        _check_missing_tests(test_names, seen_test_names, select_config.fail_on_missing, select_config.prefix)
+    _check_missing_tests(test_names, seen_test_names, select_config.fail_on_missing, select_config.prefix)
 
-        # Slice assignment is required since `items` needs to be modified in place
-        items[:] = selected_items
-        config.hook.pytest_deselected(items=deselected_items)
+    # Slice assignment is required since `items` needs to be modified in place
+    items[:] = selected_items
+    config.hook.pytest_deselected(items=deselected_items)
