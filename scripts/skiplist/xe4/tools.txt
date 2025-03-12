@@ -1,0 +1,8 @@
+test/unit/tools/test_aot.py::test_compile_link_autotune_matmul
+test/unit/tools/test_aot.py::test_compile_link_matmul
+test/unit/tools/test_aot.py::test_compile_link_matmul_no_specialization
+test/unit/tools/test_aot.py::test_launcher_has_no_available_kernel
+test/unit/tools/test_aot.py::test_ttgir_to_ptx
+test/unit/tools/test_disasm.py::test_disam_spvbin
+test/unit/tools/test_aot.py::test_ttgir_to_spv
+test/unit/tools/test_irsource.py::test_mlir_attribute_parsing

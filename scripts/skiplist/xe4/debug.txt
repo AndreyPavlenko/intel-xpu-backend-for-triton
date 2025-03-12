@@ -1,0 +1,6 @@
+test/unit/test_debug.py::test_device_assert
+test/unit/test_debug.py::test_device_assert_barrier
+test/unit/test_debug.py::test_sanitize_int_add_overflow
+test/unit/test_debug.py::test_sanitize_int_mul_overflow
+test/unit/test_debug.py::test_sanitize_int_sub_overflow
+test/unit/test_debug.py::test_static_assert

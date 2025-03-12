@@ -1,0 +1,6 @@
+test/regression/test_cast_matmul.py::test_cast_matmul
+test/regression/test_functional_regressions.py::test_chained_matmul
+test/regression/test_functional_regressions.py::test_inductor_cummax_bool
+test/regression/test_functional_regressions.py::test_iv_dependent_matmul
+test/regression/test_functional_regressions.py::test_reverse_range
+test/regression/test_functional_regressions.py::test_vecmat
