@@ -16,6 +16,34 @@ TEST_CONTENT = """
         assert b in (1, 4)
 """
 
+TEST_CONTENT_WITH_NESTED_BRACKETS = """
+    import pytest
+
+    @pytest.mark.parametrize(
+        ('a', 'b'),
+        (
+            (1, 1),
+            (1, 2),
+            (1, 3),
+            (1, 4),
+        )
+    )
+    def test_a(a, b):
+        assert b in (1, 4)
+
+    @pytest.mark.parametrize(
+        ('a', 'b'),
+        (
+            (1, 'a[1]'),
+            (1, '2'),
+            (1, '3'),
+            (1, '4'),
+        )
+    )
+    def test_b(a, b):
+        assert b in ('a[1]', '4')
+"""
+
 
 @pytest.mark.parametrize("option_name", ("--select-from-file", "--deselect-from-file"))
 def test_select_options_exist(testdir, option_name):
@@ -56,7 +84,12 @@ def test_missing_selection_file_fails(testdir, option_name):
         ),
         (
             "--select-from-file",
-            ["{testfile}::test_a[1-2]", "test_a[1-3]", "test_a[3-1]", "test_that_does_not_exist"],
+            [
+                "{testfile}::test_a[1-2]",
+                "test_a[1-3]",
+                "test_a[3-1]",
+                "test_that_does_not_exist",
+            ],
             1,
             {"failed": 2},
             [
@@ -76,7 +109,12 @@ def test_missing_selection_file_fails(testdir, option_name):
         ),
         (
             "--deselect-from-file",
-            ["{testfile}::test_a[1-2]", "test_a[1-3]", "test_a[3-1]", "test_that_does_not_exist"],
+            [
+                "{testfile}::test_a[1-2]",
+                "test_a[1-3]",
+                "test_a[3-1]",
+                "test_that_does_not_exist",
+            ],
             0,
             {"passed": 2},
             [
@@ -85,6 +123,13 @@ def test_missing_selection_file_fails(testdir, option_name):
                 r"\s+- test_a\[3-1\]",
                 r"\s+- test_that_does_not_exist",
             ],
+        ),
+        (
+            "--deselect-from-file",
+            ["{testfile}::test_a"],
+            5,
+            {"passed": 0, "failed": 0},
+            [],
         ),
     ),
 )
@@ -109,6 +154,8 @@ def test_tests_are_selected(testdir, select_option, exit_code, select_content, o
 def test_fail_on_missing(testdir, deselect):
     testdir.makefile(".py", TEST_CONTENT)
     selectfile = testdir.makefile(".txt", "test_a[1-1]", "test_a[2-1]")
+    prefix = "de" if deselect else ""
+    n_prefix = "" if deselect else "de"
     result = testdir.runpytest(
         "-v",
         "--select-fail-on-missing",
@@ -117,9 +164,8 @@ def test_fail_on_missing(testdir, deselect):
     )
     assert result.ret == 4
     result.stderr.re_match_lines([
-        (fr"ERROR: pytest-select: Not all {'de' if deselect else ''}selected tests exist "
-         fr"\(or have been {'' if deselect else 'de'}selected otherwise\)."),
-        f"Missing {'de' if deselect else ''}selected test names:",
+        f"ERROR: pytest-select: Not all {prefix}selected tests exist (or have been {n_prefix}selected otherwise).",
+        f"Missing {prefix}selected test names:",
         "  - test_a[2-1]",
     ])
 
@@ -136,3 +182,59 @@ def test_report_header(testdir, fail_on_missing, deselect):
     failing_suffix = ", failing on missing selection items" if fail_on_missing else ""
     deselect_prefix = "de" if deselect else ""
     result.stdout.re_match_lines([fr"select: {deselect_prefix}selecting tests from '{selectfile}'{failing_suffix}$"])
+
+
+@pytest.mark.parametrize(
+    ("option_name", "select_content", "exit_code", "outcomes"),
+    [
+        (
+            "--deselect-from-file",
+            ["{testfile}::test_a[1-2]", "test_a[1-4]", "# Ignore comment", ""],
+            1,
+            {"passed": 1, "failed": 1},
+        ),
+    ],
+)
+def test_comment_and_blanc_lines(testdir, option_name, select_content, exit_code, outcomes):
+    testfile = testdir.makefile(".py", TEST_CONTENT)
+    args = ["-v", "-Walways"]
+    select_file = testdir.makefile(
+        ".txt",
+        *[line.format(testfile=testfile.relto(testdir.tmpdir)) for line in select_content],
+    )
+    args.extend([option_name, select_file, "--select-fail-on-missing"])
+    result = testdir.runpytest(*args)
+
+    assert result.ret == exit_code
+    result.assert_outcomes(**outcomes)
+
+
+@pytest.mark.parametrize(
+    ("option_name", "select_content", "exit_code", "outcomes"),
+    [
+        (
+            "--deselect-from-file",
+            [
+                "{testfile}::test_a[1-2]",
+                "test_a[1-4]",
+                "{testfile}::test_b",
+                "# Ignore comment",
+                "",
+            ],
+            1,
+            {"passed": 1, "failed": 1},
+        ),
+    ],
+)
+def test_nested_brackets(testdir, option_name, select_content, exit_code, outcomes):
+    testfile = testdir.makefile(".py", TEST_CONTENT_WITH_NESTED_BRACKETS)
+    args = ["-v", "-Walways"]
+    select_file = testdir.makefile(
+        ".txt",
+        *[line.format(testfile=testfile.relto(testdir.tmpdir)) for line in select_content],
+    )
+    args.extend([option_name, select_file, "--select-fail-on-missing"])
+    result = testdir.runpytest(*args)
+
+    assert result.ret == exit_code
+    result.assert_outcomes(**outcomes)
