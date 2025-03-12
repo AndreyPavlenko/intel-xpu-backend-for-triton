@@ -113,8 +113,14 @@ def _check_missing_tests(tests, seen_tests, fail_on_missing, prefix):
 
 
 def _load_test_names(select_file_name) -> set[str]:
+    test_names = set()
     with Path(select_file_name).open("rt", encoding="UTF-8") as selection_file:
-        return {test_name.strip() for test_name in selection_file}
+        for test_name_raw in selection_file:
+            test_name = test_name_raw.strip()
+            if test_name.startswith("#") or test_name == "":
+                continue
+            test_names.add(test_name)
+    return test_names
 
 
 def pytest_collection_modifyitems(session, config, items):  # pylint: disable=W0613
@@ -122,14 +128,14 @@ def pytest_collection_modifyitems(session, config, items):  # pylint: disable=W0
         seen_test_names = set()
         selected_items = []
         deselected_items = []
-        variant_pattern = re.compile(r"^(.*?)\[[^\]]*\]$")
+        variant_pattern = re.compile(r"^(.*?)\[(.+)\]$")
 
         test_names = _load_test_names(select_config.file_path)
 
         for item in items:
             variant_match = variant_pattern.findall(item.nodeid)
             if len(variant_match) == 1:
-                item_path = variant_match[0]
+                item_path = variant_match[0][0]
                 seen_test_names.add(item_path)
             else:
                 item_path = item.nodeid

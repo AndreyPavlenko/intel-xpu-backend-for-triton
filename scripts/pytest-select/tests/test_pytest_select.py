@@ -16,6 +16,34 @@ TEST_CONTENT = """
         assert b in (1, 4)
 """
 
+TEST_CONTENT_WITH_NESTED_BRACKETS = """
+    import pytest
+
+    @pytest.mark.parametrize(
+        ('a', 'b'),
+        (
+            (1, 1),
+            (1, 2),
+            (1, 3),
+            (1, 4),
+        )
+    )
+    def test_a(a, b):
+        assert b in (1, 4)
+
+    @pytest.mark.parametrize(
+        ('a', 'b'),
+        (
+            (1, 'a[1]'),
+            (1, '2'),
+            (1, '3'),
+            (1, '4'),
+        )
+    )
+    def test_b(a, b):
+        assert b in ('a[1]', '4')
+"""
+
 
 @pytest.mark.parametrize("option_name", ("--select-from-file", "--deselect-from-file"))
 def test_select_options_exist(testdir, option_name):
@@ -154,3 +182,59 @@ def test_report_header(testdir, fail_on_missing, deselect):
     failing_suffix = ", failing on missing selection items" if fail_on_missing else ""
     deselect_prefix = "de" if deselect else ""
     result.stdout.re_match_lines([fr"select: {deselect_prefix}selecting tests from '{selectfile}'{failing_suffix}$"])
+
+
+@pytest.mark.parametrize(
+    ("option_name", "select_content", "exit_code", "outcomes"),
+    [
+        (
+            "--deselect-from-file",
+            ["{testfile}::test_a[1-2]", "test_a[1-4]", "# Ignore comment", ""],
+            1,
+            {"passed": 1, "failed": 1},
+        ),
+    ],
+)
+def test_comment_and_blanc_lines(testdir, option_name, select_content, exit_code, outcomes):
+    testfile = testdir.makefile(".py", TEST_CONTENT)
+    args = ["-v", "-Walways"]
+    select_file = testdir.makefile(
+        ".txt",
+        *[line.format(testfile=testfile.relto(testdir.tmpdir)) for line in select_content],
+    )
+    args.extend([option_name, select_file, "--select-fail-on-missing"])
+    result = testdir.runpytest(*args)
+
+    assert result.ret == exit_code
+    result.assert_outcomes(**outcomes)
+
+
+@pytest.mark.parametrize(
+    ("option_name", "select_content", "exit_code", "outcomes"),
+    [
+        (
+            "--deselect-from-file",
+            [
+                "{testfile}::test_a[1-2]",
+                "test_a[1-4]",
+                "{testfile}::test_b",
+                "# Ignore comment",
+                "",
+            ],
+            1,
+            {"passed": 1, "failed": 1},
+        ),
+    ],
+)
+def test_nested_brackets(testdir, option_name, select_content, exit_code, outcomes):
+    testfile = testdir.makefile(".py", TEST_CONTENT_WITH_NESTED_BRACKETS)
+    args = ["-v", "-Walways"]
+    select_file = testdir.makefile(
+        ".txt",
+        *[line.format(testfile=testfile.relto(testdir.tmpdir)) for line in select_content],
+    )
+    args.extend([option_name, select_file, "--select-fail-on-missing"])
+    result = testdir.runpytest(*args)
+
+    assert result.ret == exit_code
+    result.assert_outcomes(**outcomes)

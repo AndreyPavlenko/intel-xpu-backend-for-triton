@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="pytest-select",
-    version="0.2.1",
+    version="0.2.2",
     description="A pytest plugin which allows to (de-)select tests from a file.",
     packages=find_packages(),
     classifiers=[
