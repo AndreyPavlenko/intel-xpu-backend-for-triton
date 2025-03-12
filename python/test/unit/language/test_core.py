@@ -6425,7 +6425,7 @@ def test_convert_mma2mma(M, N, mma_pair, dtype, device, tmp_path: pathlib.Path):
 
         kernel[(1, 1, 1)](x.data_ptr(), z.data_ptr())
 
-        assert torch.equal(z.cpu(), x.cpu())
+        assert torch.equal(z, x)
 
     do_test(mma_pair[0], mma_pair[1])
     do_test(mma_pair[1], mma_pair[0])
@@ -6509,7 +6509,7 @@ def test_convert_warp_local(M, N, src_layout, dst_layout, dtype, device, tmp_pat
 
     kernel[(1, 1, 1)](x.data_ptr(), z.data_ptr())
 
-    torch.testing.assert_close(z.cpu(), x.cpu(), rtol=0, atol=0)
+    torch.testing.assert_close(z, x, rtol=0, atol=0)
 
 
 @pytest.mark.interpreter
