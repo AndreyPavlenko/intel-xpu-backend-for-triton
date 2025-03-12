@@ -1166,16 +1166,13 @@ def test_math_fma_op(dtype, device):
         tl.store(Z + off, z)
 
     torch_dtype = torch.float32 if dtype == "float32" else torch.float64
-    x = torch.randn(SIZE, dtype=torch_dtype)
-    y = torch.randn(SIZE, dtype=torch_dtype)
-    w = torch.randn(SIZE, dtype=torch_dtype)
+    x = torch.randn(SIZE, dtype=torch_dtype, device=device)
+    y = torch.randn(SIZE, dtype=torch_dtype, device=device)
+    w = torch.randn(SIZE, dtype=torch_dtype, device=device)
     z_ref = x * y + w
-    z_tri = torch.zeros_like(x).to(device)
-    x = x.to(device)
-    y = y.to(device)
-    w = w.to(device)
+    z_tri = torch.zeros_like(x)
     kernel[(1, )](z_tri, x, y, w, SIZE=SIZE, num_warps=4)
-    torch.testing.assert_close(z_tri.cpu(), z_ref)
+    torch.testing.assert_close(z_tri, z_ref)
 
 
 @pytest.mark.interpreter
@@ -1447,19 +1444,17 @@ def test_tuples(device):
         tl.store(B, b)
         tl.store(C, c)
 
-    x = torch.tensor([1.3], dtype=torch.float32)
-    y = torch.tensor([1.9], dtype=torch.float32)
+    x = torch.tensor([1.3], device=device, dtype=torch.float32)
+    y = torch.tensor([1.9], device=device, dtype=torch.float32)
     a_tri = torch.tensor([0], device=device, dtype=torch.float32)
     b_tri = torch.tensor([0], device=device, dtype=torch.float32)
     c_tri = torch.tensor([0], device=device, dtype=torch.float32)
-    x_tri = x.to(device)
-    y_tri = y.to(device)
     for kernel in [with_fn, without_fn]:
-        kernel[(1, )](x_tri, y_tri, a_tri, b_tri, c_tri, num_warps=1)
+        kernel[(1, )](x, y, a_tri, b_tri, c_tri, num_warps=1)
         a_ref, b_ref, c_ref = x + y, x - y, x * y
-        assert a_tri.cpu() == a_ref
-        assert b_tri.cpu() == b_ref
-        assert c_tri.cpu() == c_ref
+        assert a_tri == a_ref
+        assert b_tri == b_ref
+        assert c_tri == c_ref
 
 
 @triton.jit(noinline=True)
@@ -2088,15 +2083,13 @@ def test_load_store_same_ptr(device):
         out = x * 2
         tl.store(in_out_ptr + pid, out)
 
-    # Original 1000 iterations take too much time in simulation
-    # and it's not clear how it improves the coverage.
     for _ in range(1):
-        x = torch.ones((65536, ), dtype=torch.float32).to(device)
+        x = torch.ones((65536, ), device=device, dtype=torch.float32)
         if is_hip():
             kernel[(65536, )](x, num_warps=16)  # threads per Warp for ROCM is 64
         else:
             kernel[(65536, )](x, num_warps=32)
-        assert torch.all(x.cpu() == 2)
+        assert torch.all(x == 2)
 
 
 @pytest.mark.interpreter
@@ -4620,9 +4613,9 @@ def test_masked_load_shared_memory(dtype, device):
     N = 32
     K = 16
 
-    in1 = torch.rand((M, K), dtype=dtype).to(device)
-    in2 = torch.rand((K, N), dtype=dtype).to(device)
-    out = torch.zeros((M, N), dtype=dtype).to(device)
+    in1 = torch.rand((M, K), dtype=dtype, device=device)
+    in2 = torch.rand((K, N), dtype=dtype, device=device)
+    out = torch.zeros((M, N), dtype=dtype, device=device)
 
     @triton.jit
     def _kernel(in1_ptr, in2_ptr, output_ptr, in_stride, in2_stride, out_stride, in_numel, in2_numel, out_numel,
@@ -4649,8 +4642,8 @@ def test_masked_load_shared_memory(dtype, device):
     pgm = _kernel[(1, )](in1, in2, out, in1.stride()[0], in2.stride()[0], out.stride()[0], in1.numel(), in2.numel(),
                          out.numel(), M=M, N=N, K=K)
 
-    reference_out = torch.matmul(in1.cpu(), in2.cpu())
-    torch.testing.assert_close(out.cpu(), reference_out, atol=1e-2, rtol=0)
+    reference_out = torch.matmul(in1, in2)
+    torch.testing.assert_close(out, reference_out, atol=1e-2, rtol=0)
 
 
 @pytest.mark.interpreter
@@ -5250,13 +5243,13 @@ def test_if(if_type, device):
             else:
                 tl.store(Ret, tl.load(XFalse))
 
-    cond = torch.ones(1, dtype=torch.int32).to(device)
-    x_true = torch.tensor([3.14], dtype=torch.float32).to(device)
-    x_false = torch.tensor([1.51], dtype=torch.float32).to(device)
-    ret = torch.zeros(1, dtype=torch.float32).to(device)
+    cond = torch.ones(1, dtype=torch.int32, device=device)
+    x_true = torch.tensor([3.14], dtype=torch.float32, device=device)
+    x_false = torch.tensor([1.51], dtype=torch.float32, device=device)
+    ret = torch.zeros(1, dtype=torch.float32, device=device)
 
     kernel[(1, )](cond, x_true, x_false, ret, if_type, True, 1)
-    assert torch.equal(ret.cpu(), x_true.cpu())
+    assert torch.equal(ret, x_true)
 
 
 def test_num_warps_pow2(device):
@@ -6257,7 +6250,7 @@ def test_local_load_store_mma(M, N, mma_layout, shared_layout, device, tmp_path:
 }}
 """
 
-    x = torch.arange(0, M * N, dtype=torch.float16).reshape(M, N).to(device)
+    x = torch.arange(0, M * N, device=device, dtype=torch.float16).reshape(M, N)
     z = torch.empty_like(x, device=device)
 
     temp_file = tmp_path / "test_local_load_store_mma.ttgir"
@@ -6265,7 +6258,7 @@ def test_local_load_store_mma(M, N, mma_layout, shared_layout, device, tmp_path:
     kernel = triton.compile(str(temp_file))
 
     kernel[(1, 1, 1)](x, z)
-    assert torch.equal(z.cpu(), x.cpu())
+    assert torch.equal(z, x)
 
     if isinstance(shared_layout, NVMMASharedLayout) and hasattr(mma_layout, "version") and mma_layout.version[0] >= 3:
         assert "stmatrix" in kernel.asm["ptx"]
