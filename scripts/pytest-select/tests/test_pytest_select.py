@@ -1,9 +1,8 @@
 import pytest
 
-
 TEST_CONTENT = """
     import pytest
-    
+
     @pytest.mark.parametrize(
         ('a', 'b'),
         (
@@ -31,9 +30,7 @@ def test_select_options_conflict(testdir):
     result = testdir.runpytest("--select-from-file", "bla", "--deselect-from-file", "bla")
 
     assert result.ret == 4
-    result.stderr.re_match_lines(
-        ["ERROR: '--select-from-file' and '--deselect-from-file' can not be used together."]
-    )
+    result.stderr.re_match_lines(["ERROR: '--select-from-file' and '--deselect-from-file' can not be used together."])
 
 
 @pytest.mark.parametrize("option_name", ("--select-from-file", "--deselect-from-file"))
@@ -42,9 +39,7 @@ def test_missing_selection_file_fails(testdir, option_name):
     result = testdir.runpytest(option_name, missing_file_name)
 
     assert result.ret == 4
-    result.stderr.re_match_lines(
-        [f"ERROR: Given selection file '{missing_file_name}' doesn't exist."]
-    )
+    result.stderr.re_match_lines([f"ERROR: Given selection file '{missing_file_name}' doesn't exist."])
 
 
 @pytest.mark.parametrize(
@@ -93,9 +88,7 @@ def test_missing_selection_file_fails(testdir, option_name):
         ),
     ),
 )
-def test_tests_are_selected(
-    testdir, select_option, exit_code, select_content, outcomes, stdout_lines
-):
+def test_tests_are_selected(testdir, select_option, exit_code, select_content, outcomes, stdout_lines):
     testfile = testdir.makefile(".py", TEST_CONTENT)
     args = ["-v", "-Walways"]
     if select_option and select_content:
@@ -123,21 +116,15 @@ def test_fail_on_missing(testdir, deselect):
         selectfile,
     )
     assert result.ret == 4
-    result.stderr.re_match_lines(
-        [
-            (
-                fr"ERROR: pytest-select: Not all {'de' if deselect else ''}selected tests exist "
-                fr"\(or have been {'' if deselect else 'de'}selected otherwise\)."
-            ),
-            f"Missing {'de' if deselect else ''}selected test names:",
-            "  - test_a[2-1]",
-        ]
-    )
+    result.stderr.re_match_lines([
+        (fr"ERROR: pytest-select: Not all {'de' if deselect else ''}selected tests exist "
+         fr"\(or have been {'' if deselect else 'de'}selected otherwise\)."),
+        f"Missing {'de' if deselect else ''}selected test names:",
+        "  - test_a[2-1]",
+    ])
 
 
-@pytest.mark.parametrize(
-    ("fail_on_missing", "deselect"), [(True, False), (True, True), (False, False), (False, True)]
-)
+@pytest.mark.parametrize(("fail_on_missing", "deselect"), [(True, False), (True, True), (False, False), (False, True)])
 def test_report_header(testdir, fail_on_missing, deselect):
     testdir.makefile(".py", TEST_CONTENT)
     selectfile = testdir.makefile(".txt", "test_a[1-1]")
@@ -148,6 +135,4 @@ def test_report_header(testdir, fail_on_missing, deselect):
 
     failing_suffix = ", failing on missing selection items" if fail_on_missing else ""
     deselect_prefix = "de" if deselect else ""
-    result.stdout.re_match_lines(
-        [fr"select: {deselect_prefix}selecting tests from '{selectfile}'{failing_suffix}$"]
-    )
+    result.stdout.re_match_lines([fr"select: {deselect_prefix}selecting tests from '{selectfile}'{failing_suffix}$"])

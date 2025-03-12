@@ -1,6 +1,4 @@
 from setuptools import setup, find_packages
-import os
-
 
 setup(
     name="pytest-select",
@@ -19,20 +17,16 @@ setup(
     install_requires=[
         "pytest",
     ],
-    extras_require={
-        "dev": [
-            "black",
-            "coverage",
-            "flake8",
-            "flake8-bugbear",
-            "mutmut",
-            "bump2version",
-        ]
-    },
-    entry_points={
-        "pytest11": [
-            "pytest-select = pytest_select.plugin",
-        ]
-    },
+    extras_require={"dev": [
+        "black",
+        "coverage",
+        "flake8",
+        "flake8-bugbear",
+        "mutmut",
+        "bump2version",
+    ]},
+    entry_points={"pytest11": [
+        "pytest-select = pytest_select.plugin",
+    ]},
     keywords=["pytest", "test", "plugin"],
 )

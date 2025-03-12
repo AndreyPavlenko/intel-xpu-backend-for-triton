@@ -5,28 +5,20 @@ import pytest
 from pytest import PytestWarning, UsageError
 
 
-class PytestSelectWarning(PytestWarning):
+class PytestSelectWarning(PytestWarning):  # pylint:disable=R0903
     pass
 
 
 def pytest_addoption(parser):
-    select_group = parser.getgroup(
-        "select", "Modify the list of collected tests."  # pragma: no mutate  # pragma: no mutate
-    )
-    select_group.addoption(
-        "--select-from-file",
-        action="store",
-        dest="selectfromfile",
-        default=None,
-        help="Select tests given in file. One line per test name.",  # pragma: no mutate
-    )
-    select_group.addoption(
-        "--deselect-from-file",
-        action="store",
-        dest="deselectfromfile",
-        default=None,
-        help="Deselect tests given in file. One line per test name.",  # pragma: no mutate
-    )
+    select_group = parser.getgroup("select",
+                                   "Modify the list of collected tests."  # pragma: no mutate  # pragma: no mutate
+                                   )
+    select_group.addoption("--select-from-file", action="store", dest="selectfromfile", default=None,
+                           help="Select tests given in file. One line per test name.",  # pragma: no mutate
+                           )
+    select_group.addoption("--deselect-from-file", action="store", dest="deselectfromfile", default=None,
+                           help="Deselect tests given in file. One line per test name.",  # pragma: no mutate
+                           )
     select_group.addoption(
         "--select-fail-on-missing",
         action="store_true",
@@ -40,7 +32,7 @@ def pytest_addoption(parser):
 
 
 @pytest.hookimpl(trylast=True)  # pragma: no mutate
-def pytest_report_header(config):
+def pytest_report_header(config):  # pylint: disable=R1710
     _validate_option_values(config)
 
     fail_on_missing = config.getoption("selectfailonmissing")
@@ -49,7 +41,7 @@ def pytest_report_header(config):
         option_value = config.getoption(option_name)
         if option_value is not None:
             return [
-                "select: {}selecting tests from '{}'{}".format(
+                "select: {}selecting tests from '{}'{}".format(  # pylint: disable=C0209
                     "de" if not selecting else "",
                     option_value,
                     ", failing on missing selection items" if fail_on_missing else "",
@@ -57,7 +49,7 @@ def pytest_report_header(config):
             ]
 
 
-def pytest_collection_modifyitems(session, config, items):
+def pytest_collection_modifyitems(session, config, items):  # pylint: disable=W0613
     _validate_option_values(config)
 
     for option_name, should_select in [("selectfromfile", True), ("deselectfromfile", False)]:
@@ -89,11 +81,9 @@ def pytest_collection_modifyitems(session, config, items):
             # If any items remain in `test_names` those tests either don't exist or
             # have been deselected by another way - warn user
 
-            message = (
-                f"pytest-select: Not all {'' if should_select else 'de'}selected tests exist "
-                f"(or have been {'de' if should_select else ''}selected otherwise).\n"
-                f"Missing {'' if should_select else 'de'}selected test names:\n  - "
-            )
+            message = (f"pytest-select: Not all {'' if should_select else 'de'}selected tests exist "
+                       f"(or have been {'de' if should_select else ''}selected otherwise).\n"
+                       f"Missing {'' if should_select else 'de'}selected test names:\n  - ")
             message += "\n  - ".join(missing_test_names)
             if config.getoption("selectfailonmissing"):
                 raise UsageError(message)
@@ -105,14 +95,10 @@ def pytest_collection_modifyitems(session, config, items):
 
 
 def _validate_option_values(config):
-    is_option_conflict = (
-        config.getoption("selectfromfile") is not None
-        and config.getoption("deselectfromfile") is not None
-    )
+    is_option_conflict = (config.getoption("selectfromfile") is not None
+                          and config.getoption("deselectfromfile") is not None)
     if is_option_conflict:
-        raise UsageError(
-            "'--select-from-file' and '--deselect-from-file' can not be used together."
-        )
+        raise UsageError("'--select-from-file' and '--deselect-from-file' can not be used together.")
 
     for option_name in ["selectfromfile", "deselectfromfile"]:
         option_value = config.getoption(option_name)

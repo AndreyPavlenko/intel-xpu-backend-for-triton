@@ -1,8 +1,7 @@
 import sys
 from mutmut import OK_KILLED
-from mutmut.cache import init_db, db_session
+from mutmut.cache import init_db, db_session, Mutant
 from pony.orm import count
-from mutmut.cache import Mutant
 
 
 @init_db
