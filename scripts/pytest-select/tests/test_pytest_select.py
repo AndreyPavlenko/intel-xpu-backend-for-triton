@@ -44,8 +44,12 @@ TEST_CONTENT_WITH_NESTED_BRACKETS = """
         assert b in ('a[1]', '4')
 """
 
+SELECT_OPT = "--select-from-file"
+DESELECT_OPT = "--deselect-from-file"
+SKIP_OPT = "--skip-from-file"
 
-@pytest.mark.parametrize("option_name", ("--select-from-file", "--deselect-from-file"))
+
+@pytest.mark.parametrize("option_name", (SELECT_OPT, DESELECT_OPT))
 def test_select_options_exist(testdir, option_name):
     selection_file_name = testdir.makefile(".txt", "test_a", "test_b")
     result = testdir.runpytest(option_name, selection_file_name)
@@ -55,13 +59,13 @@ def test_select_options_exist(testdir, option_name):
 
 
 def test_select_options_conflict(testdir):
-    result = testdir.runpytest("--select-from-file", "bla", "--deselect-from-file", "bla")
+    result = testdir.runpytest(SELECT_OPT, "smth", DESELECT_OPT, "smth")
 
     assert result.ret == 4
-    result.stderr.re_match_lines(["ERROR: '--select-from-file' and '--deselect-from-file' can not be used together."])
+    result.stderr.re_match_lines([f"ERROR: '{SELECT_OPT}', '{DESELECT_OPT}' and '{SKIP_OPT}' cannot be used together."])
 
 
-@pytest.mark.parametrize("option_name", ("--select-from-file", "--deselect-from-file"))
+@pytest.mark.parametrize("option_name", (SELECT_OPT, DESELECT_OPT))
 def test_missing_selection_file_fails(testdir, option_name):
     missing_file_name = "no_such_file.txt"
     result = testdir.runpytest(option_name, missing_file_name)
@@ -74,16 +78,16 @@ def test_missing_selection_file_fails(testdir, option_name):
     ("select_option", "select_content", "exit_code", "outcomes", "stdout_lines"),
     (
         (None, "", 1, {"passed": 2, "failed": 2}, []),
-        ("--select-from-file", ["test_a[1-1]", "test_a[1-4]"], 0, {"passed": 2}, []),
+        (SELECT_OPT, ["test_a[1-1]", "test_a[1-4]"], 0, {"passed": 2}, []),
         (
-            "--select-from-file",
+            SELECT_OPT,
             ["{testfile}::test_a[1-2]", "test_a[1-4]"],
             1,
             {"passed": 1, "failed": 1},
             [],
         ),
         (
-            "--select-from-file",
+            SELECT_OPT,
             [
                 "{testfile}::test_a[1-2]",
                 "test_a[1-3]",
@@ -99,16 +103,16 @@ def test_missing_selection_file_fails(testdir, option_name):
                 r"\s+- test_that_does_not_exist",
             ],
         ),
-        ("--deselect-from-file", ["test_a[1-1]", "test_a[1-4]"], 1, {"failed": 2}, []),
+        (DESELECT_OPT, ["test_a[1-1]", "test_a[1-4]"], 1, {"failed": 2}, []),
         (
-            "--deselect-from-file",
+            DESELECT_OPT,
             ["{testfile}::test_a[1-2]", "test_a[1-4]"],
             1,
             {"passed": 1, "failed": 1},
             [],
         ),
         (
-            "--deselect-from-file",
+            DESELECT_OPT,
             [
                 "{testfile}::test_a[1-2]",
                 "test_a[1-3]",
@@ -125,11 +129,35 @@ def test_missing_selection_file_fails(testdir, option_name):
             ],
         ),
         (
-            "--deselect-from-file",
+            DESELECT_OPT,
             ["{testfile}::test_a"],
             5,
             {"passed": 0, "failed": 0},
             [],
+        ),
+        (
+            SKIP_OPT,
+            ["{testfile}::test_a"],
+            0,
+            {"skipped": 4},
+            [],
+        ),
+        (
+            SKIP_OPT,
+            [
+                "{testfile}::test_a[1-2]",
+                "test_a[1-3]",
+                "test_a[3-1]",
+                "test_that_does_not_exist",
+            ],
+            0,
+            {"passed": 2, "skipped": 2},
+            [
+                r".*Not all tests to skip exist \(or have been not skipped otherwise\).*",
+                r"\s+Missing test names to skip:",
+                r"\s+- test_a\[3-1\]",
+                r"\s+- test_that_does_not_exist",
+            ],
         ),
     ),
 )
@@ -188,7 +216,7 @@ def test_report_header(testdir, fail_on_missing, deselect):
     ("option_name", "select_content", "exit_code", "outcomes"),
     [
         (
-            "--deselect-from-file",
+            DESELECT_OPT,
             ["{testfile}::test_a[1-2]", "test_a[1-4]", "# Ignore comment", ""],
             1,
             {"passed": 1, "failed": 1},
@@ -213,12 +241,12 @@ def test_comment_and_blanc_lines(testdir, option_name, select_content, exit_code
     ("option_name", "select_content", "exit_code", "outcomes"),
     [
         (
-            "--deselect-from-file",
+            DESELECT_OPT,
             [
                 "{testfile}::test_a[1-2]",
                 "test_a[1-4]",
                 "{testfile}::test_b",
-                "# Ignore comment",
+                "# Smth",
                 "",
             ],
             1,
