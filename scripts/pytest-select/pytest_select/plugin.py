@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Optional, ClassVar, Pattern
 from dataclasses import dataclass, field
 import warnings
@@ -31,45 +32,34 @@ def pytest_addoption(parser):
         default=None,
         help="Deselect tests given in file. One line per test name.",
     )
+    select_group.addoption("--select-fail-on-missing", action="store_true", dest="selectfailonmissing", default=False,
+                           help="Fail instead of warn when not all (de-)selected tests could be found.")
     select_group.addoption(
-        "--select-fail-on-missing", action="store_true", dest="selectfailonmissing", default=False, help=(
-            "Fail instead of warn when not all "  # pragma: no mutate
-            "(de-)selected tests could be found."  # pragma: no mutate
-        ))
-    select_group.addoption(
-        "--select-skip-instead-of-deselect",
-        action="store_true",
-        dest="skipinsteadofdeselect",
-        default=False,
-        help="Mark test as skipped instead of deselecting in collection",
+        "--skip-from-file",
+        action="store",
+        dest="skipfromfile",
+        default=None,
+        help="Mark tests from file as skipped.",
     )
 
 
+class SelectOption(Enum):
+    SELECT = "selectfromfile"
+    DESELECT = "deselectfromfile"
+    SKIP = "skipfromfile"
+
+
 @dataclass
-class SelectConfig:  # pylint:disable = R0902
-    fail_on_missing: bool
-    skip_instead_of_deselect: bool
-    prefix: str
+class SelectConfig:
+    select_option: SelectOption
     file_path: Optional[str]
-    select_from_file: bool = False
-    deselect_from_file: bool = False
+    fail_on_missing: bool
     test_names: set[str] = field(default_factory=set)
     seen_test_names: set[str] = field(default_factory=set)
-    select_text: str = field(init=False)
 
     variant_pattern: ClassVar[Pattern] = re.compile(r"^(.*?)\[(.+)\]$")
-    option_text: ClassVar[str] = "selectfromfile"
 
     def __post_init__(self):
-        if self.prefix == "de":
-            self.deselect_from_file = True
-        elif self.skip_instead_of_deselect:
-            raise UsageError(
-                "pytest-select: '--select-skip-instead-of-deselect' can only be used with '--deselect-from-file' option."
-            )
-        else:
-            self.select_from_file = True
-        self.select_text = f"{self.prefix}selectfromfile"
         if self.file_path and not Path(self.file_path).exists():
             raise UsageError(f"Given selection file '{self.file_path}' doesn't exist.")
         with Path(self.file_path).open("rt", encoding="UTF-8") as selection_file:
@@ -92,8 +82,13 @@ class SelectConfig:  # pylint:disable = R0902
         return False
 
     def get_report_header(self) -> list[str]:
+        action_text = "selecting"
+        if self.select_option == SelectOption.DESELECT:
+            action_text = "deselecting"
+        elif self.select_option == SelectOption.SKIP:
+            action_text = "skipping"
         suffix = ", failing on missing selection items" if self.fail_on_missing else ""
-        report_header = f"select: {self.prefix}selecting tests from '{self.file_path}'{suffix}"
+        report_header = f"select: {action_text} tests from '{self.file_path}'{suffix}"
         return [report_header]
 
     def check_missing_tests(self):
@@ -101,10 +96,18 @@ class SelectConfig:  # pylint:disable = R0902
         if missing_test_names:
             # If any items remain in `test_names` those tests either don't exist or
             # have been deselected by another way - warn user
-            n_prefix = "" if self.prefix == "de" else "de"
-            message = (f"pytest-select: Not all {self.prefix}selected tests exist "
-                       f"(or have been {n_prefix}selected otherwise).\n"
-                       f"Missing {self.prefix}selected test names:\n  - ")
+            if self.select_option == SelectOption.SELECT:
+                message = ("pytest-select: Not all selected tests exist "
+                           "(or have been deselected otherwise).\n"
+                           "Missing selected test names:\n  - ")
+            elif self.select_option == SelectOption.DESELECT:
+                message = ("pytest-select: Not all deselected tests exist "
+                           "(or have been selected otherwise).\n"
+                           "Missing deselected test names:\n  - ")
+            else:
+                message = ("pytest-select: Not all tests to skip exist "
+                           "(or have been not skipped otherwise).\n"
+                           "Missing test names to skip:\n  - ")
             message += "\n  - ".join(missing_test_names)
             if self.fail_on_missing:
                 raise UsageError(message)
@@ -112,25 +115,21 @@ class SelectConfig:  # pylint:disable = R0902
 
     @classmethod
     def from_config(cls, config: pytest.Config) -> Optional["SelectConfig"]:
-        option_prefix = ""
-        file_path: str | None = None
         fail_on_missing = config.getoption("selectfailonmissing")
-        skip_instead_of_deselect = config.getoption("skipinsteadofdeselect")
-        if (option := config.getoption(f"{cls.option_text}")) is not None:
-            file_path = option
-        if (option := config.getoption(f"de{cls.option_text}")) is not None:
-            if file_path is not None:
-                raise UsageError("'--select-from-file' and '--deselect-from-file' can not be used together.")
-            option_prefix = "de"
-            file_path = option
+        file_path = None
+        for option in SelectOption:
+            if (option_value := config.getoption(option.value)) is not None:
+                select_option = option
+            else:
+                continue
+            if file_path is None:
+                file_path = option_value
+            else:
+                raise UsageError(
+                    "'--select-from-file', '--deselect-from-file' and '--skip-from-file' cannot be used together.")
         if file_path is None:
             return None
-        return SelectConfig(
-            fail_on_missing,
-            skip_instead_of_deselect,
-            option_prefix,
-            file_path,
-        )
+        return SelectConfig(select_option, file_path, fail_on_missing)
 
 
 @pytest.hookimpl(trylast=True)  # pragma: no mutate
@@ -143,26 +142,21 @@ def pytest_collection_modifyitems(session, config, items):  # pylint: disable=W0
     select_config = SelectConfig.from_config(config)
     if select_config is None:
         return
+    option = select_config.select_option
     selected_items = []
     deselected_items = []
     for item in items:
         no_match = select_config.no_test_items_match(item.name, item.nodeid, mark_as_seen_if_match=True)
-
-        if no_match and select_config.select_from_file:
-            deselected_items.append(item)
-            continue
-        if (no_match and (select_config.deselect_from_file or select_config.skip_instead_of_deselect)):
+        if (option in [SelectOption.DESELECT, SelectOption.SKIP] and no_match
+                or option in [SelectOption.SELECT] and not no_match):
             selected_items.append(item)
             continue
-
-        if select_config.skip_instead_of_deselect:
-            item.add_marker(pytest.mark.skip(reason="Deselected by pytest-select."))
-        elif select_config.select_from_file:
-            selected_items.append(item)
+        if option in [SelectOption.SKIP]:
+            item.add_marker(pytest.mark.skip(reason="Deselected by pytest-select"))
         else:
             deselected_items.append(item)
     select_config.check_missing_tests()
-    if select_config.skip_instead_of_deselect:
+    if option in [SelectOption.SKIP]:
         return
     items[:] = selected_items
     config.hook.pytest_deselected(items=deselected_items)
