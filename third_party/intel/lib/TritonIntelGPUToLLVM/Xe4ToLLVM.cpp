@@ -203,6 +203,19 @@ struct ShuffleLowering : public ConvertOpToLLVMPattern<mlir::gpu::ShuffleOp> {
   }
 };
 
+struct FixCallCConv : public ConvertOpToLLVMPattern<LLVM::CallOp> {
+  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+
+  LogicalResult
+  matchAndRewrite(LLVM::CallOp op, LLVM::CallOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    rewriter.startOpModification(op);
+    op.setCConv(LLVM::cconv::CConv::PISA_FUNC);
+    rewriter.finalizeOpModification(op);
+    return success();
+  }
+};
+
 } // namespace
 
 void mlir::triton::intel::populateXe4ToLLVMPatterns(
@@ -216,4 +229,5 @@ void mlir::triton::intel::populateXe4ToLLVMPatterns(
                                                     "groupcount");
   patterns.add<BarrierLowering>(typeConverter);
   patterns.add<ShuffleLowering>(typeConverter);
+  patterns.add<FixCallCConv>(typeConverter);
 }
