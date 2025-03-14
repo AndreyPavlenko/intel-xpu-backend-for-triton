@@ -4736,7 +4736,7 @@ def test_assume(device):
         else:
             tl.store(out_ptr + tl.program_id(0), current_size + 101024)
 
-    output = torch.zeros(1024 // 128).to(device)
+    output = torch.zeros(1024 // 128, device=device)
     pgm = _kernel[(1024 // 128, )](output, N=1024, BLOCK_N=128)
 
     if is_interpreter():
