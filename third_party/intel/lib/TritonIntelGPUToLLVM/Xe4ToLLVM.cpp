@@ -136,8 +136,8 @@ struct ShuffleLowering : public ConvertOpToLLVMPattern<mlir::gpu::ShuffleOp> {
     if (vals.size() > 1) {
       assert(vals.size() == 2);
       val = b.undef(vec_ty(i32_ty, 2));
-      b.insert_element(val, vals[0], b.i32_val(0));
-      b.insert_element(val, vals[1], b.i32_val(1));
+      val = b.insert_element(val, vals[0], b.i32_val(0));
+      val = b.insert_element(val, vals[1], b.i32_val(1));
       val = b.bitcast(val, i64_ty);
     }
 
@@ -176,10 +176,15 @@ struct ShuffleLowering : public ConvertOpToLLVMPattern<mlir::gpu::ShuffleOp> {
     }
 
     SmallVector<Value> res;
+    auto funcAttrs = convergentNoUnwindWillReturnAttrs;
+    funcAttrs.memEffectsAttr = rewriter.getAttr<LLVM::MemoryEffectsAttr>(
+        /*other=*/LLVM::ModRefInfo::NoModRef,
+        /*argMem=*/LLVM::ModRefInfo::NoModRef,
+        /*inaccessibleMem=*/LLVM::ModRefInfo::NoModRef);
     for (auto val : vals) {
       auto call = createDeviceFunctionCall(
           rewriter, fnName, val.getType(), {i32_ty, i32_ty, i32_ty, i32_ty},
-          {val, offset, b.i32_val(0), b.i32_val(-1)}, {}, {}, {},
+          {val, offset, b.i32_val(0), b.i32_val(-1)}, {}, funcAttrs, {},
           LLVM::cconv::CConv::PISA_FUNC);
       res.push_back(call.getResult());
     }
