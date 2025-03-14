@@ -158,8 +158,10 @@ jobs:
       python_version: ${{ matrix.python }}
       upload_test_reports: ${{ inputs.upload_test_reports || needs.prepare.outputs.TESTING_ON_JGS == 'true' }}
       ignore_errors: ${{ inputs.ignore_errors || needs.prepare.outputs.TESTING_ON_JGS == 'true' }}
-      skip_list: ${{ inputs.skip_list }}
+      skip_list: ${{ needs.prepare.outputs.TESTING_ON_JGS == 'true' && 'xe4' || inputs.skip_list }}
       run_name: ${{ inputs.run_name }}
       enable_unskip: ${{ inputs.enable_unskip || false }}
       use_pyenv_python: ${{ inputs.use_pyenv_python || false }}
       jgs_env: ${{ needs.prepare.outputs.TESTING_ON_JGS == 'true' }}
+      parallel_tests_number: ${{ needs.prepare.outputs.TESTING_ON_JGS == 'true' && 32 || 8 }}
+      enable_e2e_tests: ${{ needs.prepare.outputs.TESTING_ON_JGS != 'true' }}

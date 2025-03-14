@@ -68,6 +68,14 @@ on:
         description: Activate JGS simulator environment
         type: boolean
         default: false
+      parallel_tests_number:
+        description: Number of parallel tests to run with pytest-xdist
+        type: number
+        default: 8
+      enable_e2e_tests:
+        description: Enable E2E tests
+        type: boolean
+        default: true
 
 permissions: read-all
 
@@ -75,6 +83,7 @@ env:
   TRITON_DISABLE_LINE_INFO: 1
   TEST_UNSKIP: ${{ inputs.enable_unskip }}
   LLVM_REPO: ${{ inputs.jgs_env && 'ienkovich/drivers.gpu.compiler.llvm-pisa' || 'llvm/llvm-project' }}
+  PYTEST_MAX_PROCESSES: ${{ inputs.parallel_tests_number }}
 
 jobs:
   integration-tests:
@@ -196,6 +205,7 @@ jobs:
           try-tag-prefix: v
 
       - name: Run E2E test
+        if: ${{ inputs.enable_e2e_tests }}
         run: |
           ${{ env.TRITON_TEST_CMD }} --inductor --skip-pip-install
 
