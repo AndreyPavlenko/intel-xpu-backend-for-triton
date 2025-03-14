@@ -4505,7 +4505,7 @@ def test_arange(start, num_ctas, device):
         tl.store(z + off, val)
 
     _kernel[(1, )](z_tri, START=start, END=start + BLOCK, BLOCK=BLOCK, num_ctas=num_ctas)
-    z_ref = torch.arange(start, BLOCK + start, dtype=torch.int32)
+    z_ref = torch.arange(start, BLOCK + start, dtype=torch.int32, device=device)
     np.testing.assert_allclose(to_numpy(z_tri), to_numpy(z_ref))
 
 
