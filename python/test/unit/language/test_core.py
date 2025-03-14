@@ -2377,8 +2377,11 @@ def get_reduced_dtype(dtype_str, op):
     'sum',
 ] for dtype in dtypes_with_bfloat16 for shape in [32, 64, 128, 512]])
 @pytest.mark.parametrize("num_ctas", num_ctas_list)
-@pytest.mark.parametrize("num_warps, threads_per_warp",
-                         [(64, 16), (4, THREADS_PER_WARP)] if is_xpu() else [(4, THREADS_PER_WARP)])
+@pytest.mark.parametrize(
+    "num_warps, threads_per_warp",
+    # FIXME: filter out usupported threads per warp using device prop when correct properties are provided for Xe4
+    [(64, 16),
+     (4, THREADS_PER_WARP)] if is_xpu() and not os.getenv("TRITON_INTEL_ENABLE_XE4", "0") else [(4, THREADS_PER_WARP)])
 def test_reduce1d(op, dtype_str, shape, num_ctas, num_warps, threads_per_warp, device):
     check_type_supported(dtype_str, device)  # bfloat16 on cc < 80 will not be tested
 
@@ -2485,8 +2488,11 @@ reduce_bool = [(op, 'bool', shape, axis, False) for op in ['xor_sum'] for shape 
     "op, dtype_str, shape, axis, keep_dims", reduce_configs1 + reduce_configs2 + reduce_configs3 + invalid_config +
     negative_config + keep_dims_2d_configs + keep_dims_3d_configs + reduce_bool)
 @pytest.mark.parametrize("num_ctas", num_ctas_list)
-@pytest.mark.parametrize("num_warps, threads_per_warp",
-                         [(64, 16), (4, THREADS_PER_WARP)] if is_xpu() else [(4, THREADS_PER_WARP)])
+@pytest.mark.parametrize(
+    "num_warps, threads_per_warp",
+    # FIXME: filter out usupported threads per warp using device prop when correct properties are provided for Xe4
+    [(64, 16),
+     (4, THREADS_PER_WARP)] if is_xpu() and not os.getenv("TRITON_INTEL_ENABLE_XE4", "0") else [(4, THREADS_PER_WARP)])
 def test_reduce(op, dtype_str, shape, axis, keep_dims, num_ctas, num_warps, threads_per_warp, device):
     check_type_supported(dtype_str, device)  # bfloat16 on cc < 80 will not be tested
 

@@ -176,6 +176,12 @@ class XPUBackend(BaseBackend):
         dev_prop['has_subgroup_matrix_multiply_accumulate_tensor_float32'] = False
         dev_prop['has_subgroup_2d_block_io'] = False
         dev_prop['has_bfloat16_conversions'] = True
+        # Fo Xe4 we can only use 32 threads per warp
+        # Ignore tgt_prop that might provide another info
+        if self.capability == Capability.XE4:
+            dev_prop['sub_group_sizes'] = [32]
+            dev_prop['max_num_sub_groups'] = 32
+            dev_prop['max_work_group_size'] = 1024
 
         # FIXME: Query device properties instead of relying on the capability
         dev_prop['has_fp8_dpas'] = self.capability == Capability.XE3p

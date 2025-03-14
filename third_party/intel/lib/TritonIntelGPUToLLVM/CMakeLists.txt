@@ -12,10 +12,12 @@ add_triton_library(TritonIntelGPUToLLVM
     LoadStoreOpToLLVM.cpp
     MakeRangeOpToLLVM.cpp
     pISAAsmFormat.cpp
+    PISATargetInfo.cpp
     PrintOpToLLVM.cpp
     ReduceOpToLLVM.cpp
     TritonGPUToLLVM.cpp
     SPMDOpToLLVM.cpp
+    SPIRVTargetInfo.cpp
     TargetInfo.cpp
     TensorPtrOpsToLLVM.cpp
     TritonGPUToLLVM.cpp
