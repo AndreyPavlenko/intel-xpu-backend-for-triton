@@ -174,6 +174,8 @@ class SelectPlugin:
         config.hook.pytest_deselected(items=deselected_items)
 
     def pytest_testnodedown(self, node, error):  # pylint: disable=W0613
+        if not hasattr(node, "workeroutput"):
+            return
         worker_output = node.workeroutput
         if worker_output and "seen_test_names" in worker_output:
             # Extend the global list with the names received from the worker.
