@@ -189,17 +189,17 @@ run_core_tests() {
   ensure_spirv_dis
 
   TRITON_DISABLE_LINE_INFO=1 TRITON_TEST_SUITE=language \
-    pytest -vvv -n ${PYTEST_MAX_PROCESSES:-8} --device xpu language/ --ignore=language/test_line_info.py --ignore=language/test_subprocess.py --ignore=language/test_warp_specialization.py
+    pytest -vvv -n ${PYTEST_MAX_PROCESSES:-8} --max-worker-restart=9999 --device xpu language/ --ignore=language/test_line_info.py --ignore=language/test_subprocess.py --ignore=language/test_warp_specialization.py
 
   TRITON_DISABLE_LINE_INFO=1 TRITON_TEST_SUITE=subprocess \
-    pytest -vvv -n ${PYTEST_MAX_PROCESSES:-8} --device xpu language/test_subprocess.py
+    pytest -vvv -n ${PYTEST_MAX_PROCESSES:-8} --max-worker-restart=9999 --device xpu language/test_subprocess.py
 
   # run runtime tests serially to avoid race condition with cache handling.
   TRITON_DISABLE_LINE_INFO=1 TRITON_TEST_SUITE=runtime \
     pytest -k "not test_within_2gb" --verbose --device xpu runtime/ --ignore=runtime/test_cublas.py
 
   TRITON_TEST_SUITE=debug \
-    pytest --verbose -n ${PYTEST_MAX_PROCESSES:-8} test_debug.py --forked --device xpu
+    pytest --verbose -n ${PYTEST_MAX_PROCESSES:-8} --max-worker-restart=9999 test_debug.py --forked --device xpu
 
   # run test_line_info.py separately with TRITON_DISABLE_LINE_INFO=0
   TRITON_DISABLE_LINE_INFO=0 TRITON_TEST_SUITE=line_info \
@@ -230,7 +230,7 @@ run_interpreter_tests() {
   cd $TRITON_PROJ/python/test/unit
 
   TRITON_INTERPRET=1 TRITON_TEST_SUITE=interpreter \
-    pytest -vvv -n ${PYTEST_MAX_PROCESSES:-16} -m interpreter language/test_core.py language/test_standard.py \
+    pytest -vvv -n ${PYTEST_MAX_PROCESSES:-16} --max-worker-restart=9999 -m interpreter language/test_core.py language/test_standard.py \
     language/test_random.py language/test_line_info.py --device cpu
 }
 
