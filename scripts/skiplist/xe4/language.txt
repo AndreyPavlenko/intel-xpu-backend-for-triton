@@ -39,7 +39,6 @@ test/unit/language/test_core.py::test_math_divide_op
 test/unit/language/test_core.py::test_math_erf_op
 test/unit/language/test_core.py::test_math_extern
 test/unit/language/test_core.py::test_math_op
-test/unit/language/test_core.py::test_max_returns_zero
 test/unit/language/test_tuple.py::test_namedtuple
 test/unit/language/test_core.py::test_noinline
 test/unit/language/test_core.py::test_optimize_thread_locality
