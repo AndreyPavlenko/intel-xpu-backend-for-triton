@@ -1942,9 +1942,9 @@ def test_cast(dtype_x, dtype_z, bitcast, size, num_ctas, device):
     torch.manual_seed(0)
     # This is tricky because numpy doesn't have bfloat, and torch doesn't have uints.
     if dtype_x.startswith('bfloat'):
-        x_tri = torch.randn(size, dtype=getattr(torch, dtype_x))
+        x_tri = torch.randn(size, dtype=getattr(torch, dtype_x), device=device)
     elif dtype_x.startswith('float8'):
-        x_tri = torch.randn(size, dtype=torch.half).to(dtype=getattr(torch, dtype_x))
+        x_tri = torch.randn(size, dtype=torch.half, device=device).to(dtype=getattr(torch, dtype_x))
     else:
         x = numpy_random(size, dtype_str=dtype_x, low=-10, high=10) * 10
         # Triton clamps negative values to zero, while numpy wraps around
@@ -1952,11 +1952,10 @@ def test_cast(dtype_x, dtype_z, bitcast, size, num_ctas, device):
         # TODO: figure out which one should actually be happening, and test it
         if dtype_z in uint_dtypes:
             x = np.absolute(x)
-        x_tri = to_triton(x, device="cpu")
+        x_tri = to_triton(x, device=device)
     if 'float' in dtype_z and 'float' in dtype_x:
         # make sure we use values that can be represented in both types
         x_tri = x_tri.to(getattr(torch, dtype_z)).to(getattr(torch, dtype_x))
-    x_tri = x_tri.to(device)
     # triton kernel
 
     @triton.jit
@@ -1987,7 +1986,7 @@ def test_cast(dtype_x, dtype_z, bitcast, size, num_ctas, device):
     if dtype_z.startswith('bfloat'):
         z_tri = torch.empty((size, ), dtype=getattr(torch, dtype_z), device=device)
     elif dtype_z.startswith('float8'):
-        z_tri = torch.empty((size, ), dtype=torch.half).to(dtype=getattr(torch, dtype_z)).to(device)
+        z_tri = torch.empty((size, ), dtype=torch.half, device=device).to(dtype=getattr(torch, dtype_z))
     else:
         z_tri = to_triton(np.empty((size, ), dtype=getattr(np, dtype_z_np)), device=device)
 
@@ -1995,11 +1994,10 @@ def test_cast(dtype_x, dtype_z, bitcast, size, num_ctas, device):
     kernel[(1, )](x_tri, z_tri, TO_TYPE=dtype_z_tri, BITCAST=bitcast, SIZE=size, ARG_HASH=arg_hash, num_warps=1,
                   num_ctas=num_ctas)
     # torch result
-    z_tri = z_tri.cpu()
     if dtype_z.startswith('bfloat') or dtype_x.startswith('bfloat') or dtype_z.startswith(
             'float8') or dtype_x.startswith('float8'):
         assert bitcast is False
-        z_ref = x_tri.cpu().to(z_tri.dtype)
+        z_ref = x_tri.to(z_tri.dtype)
         if dtype_z.startswith('float8') and device not in ['cuda']:
             t = z_ref.byte() ^ z_tri.byte()
             torch.testing.assert_close(torch.zeros_like(t, dtype=torch.uint8), t)
