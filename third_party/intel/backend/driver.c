@@ -66,10 +66,18 @@ extern "C" EXPORT_FUNC PyObject *get_device_properties(int device_id) {
   int max_shared_mem = compute_properties.maxSharedLocalMemory;
   int max_group_size = compute_properties.maxTotalGroupSize;
   int num_subgroup_sizes = compute_properties.numSubGroupSizes;
-  PyObject *subgroup_sizes = PyTuple_New(num_subgroup_sizes);
-  for (int i = 0; i < num_subgroup_sizes; i++) {
-    PyTuple_SetItem(subgroup_sizes, i,
-                    PyLong_FromLong(compute_properties.subGroupSizes[i]));
+  PyObject *subgroup_sizes = NULL;
+  // FIXME: Remove hardcoded properties when runtime provides
+  // correct information for Xe4.
+  if (isEnvValueBool(getStrEnv("TRITON_INTEL_ENABLE_XE4"))) {
+    subgroup_sizes = PyTuple_New(1);
+    PyTuple_SetItem(subgroup_sizes, 0, PyLong_FromLong(32));
+  } else {
+    subgroup_sizes = PyTuple_New(num_subgroup_sizes);
+    for (int i = 0; i < num_subgroup_sizes; i++) {
+      PyTuple_SetItem(subgroup_sizes, i,
+                      PyLong_FromLong(compute_properties.subGroupSizes[i]));
+    }
   }
 
   uint32_t memoryCount = 0;
