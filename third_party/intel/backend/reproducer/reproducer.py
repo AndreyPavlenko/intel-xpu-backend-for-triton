@@ -24,6 +24,9 @@ def make_tensor_loop(tensor, name, shape, idx, lines, sfx):
                 or hasattr(tensor, "compare_with_equal_nan")):
             rtol = getattr(tensor, "compare_with_rtol", 1e-05)
             atol = getattr(tensor, "compare_with_atol", 1e-08)
+            if "64" not in str(tensor.dtype):
+                rtol = f"{rtol}f"
+                atol = f"{atol}f"
             equal_nan = str(getattr(tensor, "compare_with_equal_nan", False)).lower()
             lines.append(f"{sfx}if (!isClose({name}[idx], {name}Ref[idx], {rtol}, {atol}, {equal_nan})) {{")
         else:
@@ -60,12 +63,14 @@ def create_reproducer(dir_path, args, constants, signature):
     tensors_ref_cmp = []
     set_args = []
     for karg_cnt, ((sig_name, sig_type), arg) in enumerate(zip(signature.items(), args[9:])):
+        if isinstance(tensor := getattr(arg, "base", None), torch.Tensor):  # triton.runtime.jit.TensorWrapper
+            arg = tensor
         if isinstance(arg, torch.Tensor):
             name = f"tensor{len(tensors)}"
             ctype = f"tt_{sig_type[1:]}"
             is_float = "f" in sig_type
             tensors[name] = ctype
-            set_args.append(f"{karg_cnt}, static_cast<void *>({name}Dev.ptr)")
+            set_args.append(f"{len(set_args)}, static_cast<void *>({name}Dev.ptr)")
             save_raw_tensor(arg, os.path.join(data_dir_path, f"{name}.bin"))
             if hasattr(arg, "compare_with"):
                 tensors_ref.append(name)
@@ -82,8 +87,8 @@ def create_reproducer(dir_path, args, constants, signature):
                 "strides": list(arg.stride())
             }
             args_dict["arguments"].append(new_arg)
-        if isinstance(arg, numbers.Number) and (karg_cnt, ) not in constants.keys():
-            set_args.append(f"{karg_cnt}, static_cast<tt_{sig_type}>({arg})")
+        elif isinstance(arg, numbers.Number) and (karg_cnt, ) not in constants.keys():
+            set_args.append(f"{len(set_args)}, static_cast<tt_{sig_type}>({arg})")
             new_arg = {"name": f"scalar{scalars_cnt}", "type": "scalar", "value": arg, "ctype": sig_type}
             args_dict["arguments"].append(new_arg)
             scalars_cnt += 1

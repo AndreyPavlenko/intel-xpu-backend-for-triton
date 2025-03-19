@@ -23,68 +23,61 @@ using tt_fp32 = float;
 using tt_fp64 = double;
 
 #pragma pack(push, 1)
-struct tt_fp16 {
-  uint32_t mantissa : 10;
-  uint32_t exponent : 5;
+template <unsigned M /* Mantissa bits */, unsigned E /* Exponent bits */,
+          unsigned B /* Bias */ = (1u << (E - 1)) - 1,
+          bool NI /* Convert NaN or Inf */ = B != 127 && B != (1u << E) - 1,
+          bool DN /* Convert denormalized */ = B != 127>
+struct tt_fpme {
+  uint32_t mantissa : M;
+  uint32_t exponent : E;
   uint32_t sign : 1;
 
+  constexpr static unsigned mantissaBitWidth() { return M; }
+
+  constexpr static unsigned exponentBitWidth() { return E; }
+
   explicit operator float() const {
-    uint32_t value = sign << 31;
-    if (exponent) {
-      if (exponent == 31) { // NaN or Inf
-        value |= 0x7F800000 | (mantissa << 13);
-      } else { // Normalized number
-        value |= ((exponent + 112) << 23) | (mantissa << 13);
+    constexpr unsigned mShift = 23 - M;
+    constexpr uint32_t eAdjust = 127 - B;
+
+    if constexpr (NI) {
+      constexpr uint32_t maxExp = (1u << E) - 1;
+      if (exponent == maxExp) { // NaN or Inf
+        uint32_t v = (sign << 31) | 0x7F800000 | (mantissa << mShift);
+        return *reinterpret_cast<float *>(&v);
       }
-    } else if (mantissa) { // Denormalized number
-      // Shift mantissa (clz + 14) bits left. 14 - to remove the implicit bit.
-      // Subtract the leading 22 zeros in 32-bit int before the mantissa.
-      auto shift = __builtin_clz(mantissa) - 8 /*14 - 22*/;
-      value |= ((126 - shift) << 23) | ((mantissa & 0x1FF) << shift);
-    } else { // Zero
-      value |= 0;
     }
-    return *reinterpret_cast<float *>(&value);
+
+    if constexpr (DN) {
+      if (!exponent) {
+        // Denormalized value = (mantissa / 2^mantissa_bits) * 2^(1 - bias)
+        static const float mul = std::pow(2.0f, 1 - static_cast<int>(B)) /
+                                 static_cast<float>(1u << M);
+        float v = static_cast<float>(mantissa) * mul;
+        return sign ? -v : v;
+      }
+    }
+
+    uint32_t v =
+        (sign << 31) | ((exponent + eAdjust) << 23) | (mantissa << mShift);
+    return *reinterpret_cast<float *>(&v);
   }
 
-  bool operator==(const tt_fp16 &other) const {
-    return (sign == other.sign) && (exponent == other.exponent) &&
-           (mantissa == other.mantissa);
+  bool operator==(const tt_fpme &other) const {
+    return (mantissa == other.mantissa) && (exponent == other.exponent) &&
+           (sign == other.sign);
   }
 
-  bool operator!=(const tt_fp16 &other) const { return !(*this == other); }
-};
+  bool operator!=(const tt_fpme &other) const { return !(*this == other); }
 
-struct tt_bf16 {
-  uint32_t mantissa : 7;
-  uint32_t exponent : 8;
-  uint32_t sign : 1;
-
-  explicit operator float() const {
-    uint32_t value = sign << 31;
-    value |= exponent << 23;
-    value |= mantissa << 16;
-    return *reinterpret_cast<float *>(&value);
+  friend std::ostream &operator<<(std::ostream &os, const tt_fpme &value) {
+    return os << static_cast<float>(value)
+              << " (m=" << std::bitset<M>(value.mantissa)
+              << ", e=" << std::bitset<E>(value.exponent)
+              << ", s=" << value.sign << ')';
   }
-
-  bool operator==(const tt_bf16 &other) const {
-    return (sign == other.sign) && (exponent == other.exponent) &&
-           (mantissa == other.mantissa);
-  }
-
-  bool operator!=(const tt_bf16 &other) const { return !(*this == other); }
 };
 #pragma pack(pop)
-
-namespace std {
-std::string to_string(const tt_fp16 &value) {
-  return std::to_string(static_cast<float>(value));
-}
-
-std::string to_string(const tt_bf16 &value) {
-  return std::to_string(static_cast<float>(value));
-}
-} // namespace std
 
 template <typename T>
 bool isClose(T x, T y, T rtol = 1e-05, T atol = 1e-08, bool nanEq = false) {
@@ -97,17 +90,29 @@ bool isClose(T x, T y, T rtol = 1e-05, T atol = 1e-08, bool nanEq = false) {
   return std::abs(x - y) <= atol + rtol * std::abs(y);
 }
 
-bool isClose(tt_fp16 x, tt_fp16 y, float rtol = 1e-05, float atol = 1e-08,
-             bool nanEq = false) {
-  return isClose(static_cast<float>(x), static_cast<float>(y), rtol, atol,
-                 nanEq);
-}
+#define TT_FPB(N, M, E, B)                                                     \
+  struct tt_##N : tt_fpme<M, E, B> {};                                         \
+                                                                               \
+  bool isClose(tt_##N x, tt_##N y, float rtol = 1e-05, float atol = 1e-08,     \
+               bool nanEq = false) {                                           \
+    return isClose(static_cast<float>(x), static_cast<float>(y), rtol, atol,   \
+                   nanEq);                                                     \
+  }                                                                            \
+                                                                               \
+  namespace std {                                                              \
+  std::string to_string(const tt_##N &value) {                                 \
+    std::ostringstream oss;                                                    \
+    oss << value;                                                              \
+    return oss.str();                                                          \
+  }                                                                            \
+  }
+#define TT_FP(N, M, E) TT_FPB(N, M, E, ((1u << (E - 1)) - 1))
 
-bool isClose(tt_bf16 x, tt_bf16 y, float rtol = 1e-05, float atol = 1e-08,
-             bool nanEq = false) {
-  return isClose(static_cast<float>(x), static_cast<float>(y), rtol, atol,
-                 nanEq);
-}
+TT_FP(fp8e5, 2, 5)
+TT_FP(fp8e4nv, 3, 4)
+TT_FPB(fp8e4b15, 3, 4, 15)
+TT_FP(fp16, 10, 5)
+TT_FP(bf16, 7, 8)
 
 sycl::device findDevice(const std::string &name) {
   for (const auto &platform : sycl::platform::get_platforms()) {
