@@ -60,7 +60,6 @@ test/unit/language/test_core.py::test_scan_layouts
 test/unit/language/test_core.py::test_scan2d
 test/unit/language/test_random.py::test_seed_is_int
 test/unit/language/test_tuple.py::test_serialize
-test/unit/language/test_core.py::test_shift_op
 test/unit/language/test_matmul.py::test_simple_matmul
 test/unit/language/test_matmul.py::test_simple_persistent_matmul
 test/unit/language/test_standard.py::test_sort
