@@ -4528,12 +4528,12 @@ def test_masked_load(dtype_str, size, size_diff, other, num_ctas, device):
     input_size = size - size_diff
     output_size = size
     if dtype_str == 'bool':
-        input = torch.randint(0, 2, (input_size, ), dtype=dtype).to(device)
+        input = torch.randint(0, 2, (input_size, ), dtype=dtype, device=device)
     elif dtype_str in int_dtypes or dtype_str in uint_dtypes:
-        input = torch.randint(0, 127, (input_size, ), dtype=dtype).to(device)
+        input = torch.randint(0, 127, (input_size, ), dtype=dtype, device=device)
     else:
-        input = torch.rand(input_size, dtype=dtype).to(device)
-    output = torch.zeros((output_size, ), dtype=dtype).to(device)
+        input = torch.rand(input_size, dtype=dtype, device=device)
+    output = torch.zeros((output_size, ), dtype=dtype, device=device)
 
     @triton.jit
     def _kernel(in_ptr, out_ptr, in_size: tl.constexpr, out_size: tl.constexpr):
@@ -4549,9 +4549,7 @@ def test_masked_load(dtype_str, size, size_diff, other, num_ctas, device):
     kernel = patch_kernel(_kernel, {'GENERATE_TEST_HERE': f"tl.load(in_ptr + in_offsets, {mask_str})"})
     kernel[(1, )](input, output, input_size, output_size, num_ctas=num_ctas)
 
-    input = input.cpu()
-    output = output.cpu()
-    reference_out = torch.cat((input, torch.full((size_diff, ), other if other else 0, dtype=dtype)))
+    reference_out = torch.cat((input, torch.full((size_diff, ), other if other else 0, dtype=dtype, device=device)))
     torch.testing.assert_close(output, reference_out)
 
 
