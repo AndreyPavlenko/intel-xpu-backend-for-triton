@@ -13,6 +13,10 @@ from triton.runtime.cache import get_cache_manager
 from triton.backends.compiler import GPUTarget
 from triton.backends.driver import DriverBase
 
+USE_WRAPPERS = os.getenv("TRITON_INTEL_ENABLE_XE4", False) and not os.getenv("TRITON_INTERPRET", False)
+if USE_WRAPPERS:
+    import triton.backends.intel.torch_wrappers as wrappers
+
 # A hard-coded cache version that can be updated when we know that the cached file is invalid and
 # there are no other ways to detect that the runtime environment has changed. For example, a shared
 # library has been updated as a result of updated dependencies.
@@ -647,6 +651,14 @@ class XPULauncher(object):
         src = make_launcher(self.constants, self.signature)
         self.mod = compile_module_from_src(src, "__triton_launcher")
 
+        if USE_WRAPPERS and not hasattr(XPULauncher, "_bench_disabled"):
+            # Benchmarking takes to much time, when running on simulator. Disabling it.
+            # This code is placed here to avoid circular imports.
+            from triton.testing import Mark
+
+            Mark.run = lambda *args, **kwargs: print("Benchmarking on simulator is disabled due to low performance.")
+            XPULauncher._bench_disabled = True
+
     def __call__(self, *args, **kwargs):
         dir_path = os.getenv("TRITON_XPU_CREATE_REPRODUCER", None)
         if dir_path:
@@ -654,7 +666,10 @@ class XPULauncher(object):
             dir_path = os.path.join(dir_path, args[5].name)
             create_reproducer(dir_path, args, self.constants, self.signature)
 
-        self.mod.launch(args)
+        if USE_WRAPPERS:
+            wrappers.wrap_launch(self.mod, *args)
+        else:
+            self.mod.launch(args)
 
         if dir_path:
             import torch
