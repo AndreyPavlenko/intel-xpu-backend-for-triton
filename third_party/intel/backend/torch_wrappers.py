@@ -87,8 +87,8 @@ def _device_arg_decorator(func):
     """
 
     def wrapper(*args, **kwargs):
-        if device := kwargs.get("device", None):
-            if device == "xpu" or getattr(device, "type", None) == "xpu":
+        if (device := kwargs.get("device", None)) is not None:
+            if isinstance(device, _DeviceWrapper) or device == "xpu" or getattr(device, "type", None) == "xpu":
                 kwargs.pop("device")
                 tensor = func(*args, **kwargs)
                 _attach_device(tensor, device)
