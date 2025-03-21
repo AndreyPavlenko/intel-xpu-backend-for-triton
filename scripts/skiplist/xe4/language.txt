@@ -95,7 +95,6 @@ test/unit/language/test_core.py::test_atomic_cas
 test/unit/language/test_core.py::test_atomic_rmw
 test/unit/language/test_core.py::test_atomic_rmw_predicate
 test/unit/language/test_libdevice.py::test_bessel
-test/unit/language/test_block_pointer.py::test_block_copy
 test/unit/language/test_block_pointer.py::test_block_ptr_matmul_no_scf
 test/unit/language/test_standard.py::test_flip
 test/unit/language/test_standard.py::test_flip_inf

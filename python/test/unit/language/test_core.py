@@ -3485,13 +3485,12 @@ def test_trans_2d(dtype_str, shape, perm, device):
         ou_offs = tl.arange(0, ou_shape1)[:, None] * ou_shape2 + tl.arange(0, ou_shape2)[None, :]
         tl.store(Out + ou_offs, tl.permute(tl.load(In + in_offs), (trans1, trans2)))
 
-    input = torch.arange(math.prod(shape), dtype=getattr(torch, dtype_str)).reshape(shape)
+    input = torch.arange(math.prod(shape), dtype=getattr(torch, dtype_str), device=device).reshape(shape)
     expected = torch.permute(input, perm)
     # Don't do zeros_like -- that copies the layout, which we don't want.
-    actual = torch.zeros(expected.shape, dtype=getattr(torch, dtype_str)).to(device)
-    input_tri = input.to(device)
+    actual = torch.zeros(expected.shape, dtype=getattr(torch, dtype_str), device=device)
 
-    kernel[(1, )](input_tri, actual, *shape, *[shape[i] for i in perm], *perm)
+    kernel[(1, )](input, actual, *shape, *[shape[i] for i in perm], *perm)
 
     np.testing.assert_equal(to_numpy(expected), to_numpy(actual))
 
@@ -3525,13 +3524,12 @@ def test_trans_4d(dtype_str, shape, perm, device):
         )
         tl.store(out_ptr, tl.load(in_ptr).permute((trans1, trans2, trans3, trans4)))
 
-    input = torch.arange(math.prod(shape), dtype=getattr(torch, dtype_str)).reshape(shape)
+    input = torch.arange(math.prod(shape), dtype=getattr(torch, dtype_str), device=device).reshape(shape)
     expected = torch.permute(input, perm)
     # Don't do zeros_like -- that copies the layout, which we don't want.
-    actual = torch.zeros(expected.shape, dtype=getattr(torch, dtype_str)).to(device)
-    input_tri = input.to(device)
+    actual = torch.zeros(expected.shape, dtype=getattr(torch, dtype_str), device=device)
 
-    kernel[(1, )](input_tri, actual, *shape, *[shape[i] for i in perm], *perm, num_warps=8)
+    kernel[(1, )](input, actual, *shape, *[shape[i] for i in perm], *perm, num_warps=8)
 
     np.testing.assert_equal(to_numpy(expected), to_numpy(actual))
 
