@@ -102,7 +102,6 @@ test/unit/language/test_tuple.py::test_index
 test/unit/language/test_matmul.py::test_lhs_in_tmem
 test/unit/language/test_libdevice.py::test_libdevice_rename
 test/unit/language/test_pipeliner.py::test_indirect_matmul
-test/unit/language/test_annotations.py::test_int_annotation
 test/unit/language/test_core.py::test_math_divide_op
 test/unit/language/test_core.py::test_math_erf_op
 test/unit/language/test_core.py::test_math_extern
