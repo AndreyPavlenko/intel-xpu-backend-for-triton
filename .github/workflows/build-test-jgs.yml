@@ -132,3 +132,4 @@ jobs:
           export BASE=$HOME
           export PATH="$BASE/packages/llvm/bin:$PATH"
           python ./python/tutorials/01-vector-add.py
+          python ./python/tutorials/02-fused-softmax.py
